@@ -229,7 +229,7 @@ def head_crop(
         people = [d for d in dets if d.keypoints is not None and d.kp_conf is not None]
         if not people:
             continue
-        d = max(people, key=lambda d: d.conf)
+        d = max(people, key=lambda d: d.area)  # the caller, not someone in the background
         ok = d.kp_conf[:5] >= 0.3
         if ok.any():
             pts.append(d.keypoints[:5][ok])

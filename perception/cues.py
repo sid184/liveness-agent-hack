@@ -119,7 +119,9 @@ def cues_from_detections(per_frame: list[list[Detection]]) -> list[FrameCue]:
     out = []
     for dets in per_frame:
         people = [d for d in dets if d.keypoints is not None]
-        out.append(frame_cue(people[0] if len(people) == 1 else None))
+        # The caller is the largest person in frame. People in an office background are
+        # smaller; requiring exactly one person made every open-plan call unmeasurable (17 Oct).
+        out.append(frame_cue(max(people, key=lambda d: d.area) if people else None))
     return out
 
 
