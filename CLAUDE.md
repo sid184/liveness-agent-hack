@@ -5,10 +5,18 @@ work is tracked in `tasks/todo.md`; corrections go in `tasks/lessons.md`.
 
 ## What this is
 
-Moment-of-action liveness for video calls. The agent issues a physical challenge (pass an object
-in front of your face, turn your head, hold up N fingers), watches, and judges whether the
-physical interaction was coherent. Pass or fail with evidence clips and written reasoning, every
-verdict logged and indexed so later verdicts can reason over earlier ones.
+Moment-of-action liveness for video calls. The agent asks the caller to turn their head slowly
+through four directions (up, down, left, right) in a randomised order, watches, and judges whether
+the head moved like a real 3D head: pose gates from YOLO keypoints, physical coherence from Cosmos.
+Pass or fail with evidence frames and written reasoning, every verdict logged and indexed so later
+verdicts can reason over earlier ones.
+
+**Pivot on 17 Oct (build day):** the three-challenge catalogue (object pass, head turn, fingers) is
+replaced by one challenge, the head circle, with the direction order shuffled per session so a
+recording cannot be replayed. Face-swap deepfakes break at profile (NYU GOTCHA, Euro S&P 2024),
+which is the artefact Cosmos is asked to find. Test set: our own head-circle clips as `live`, and
+`attack` clips made by face-swapping those clips, replaying them on a phone screen, or generating
+them with video models. Label every clip with how it was made.
 
 ## Architecture
 
@@ -95,9 +103,53 @@ ffmpeg -f avfoundation -framerate 30 -i "0" -t 10 data/clips/live_01.mp4   # web
   `max_tokens` 4096; best under 16k multimodal tokens. Cosmos-Reason2 is a Qwen3-VL fine-tune.
 - **W&B Inference** works with the key alone, no project header. Text models only (Llama 3.3 70B,
   gpt-oss-120b, DeepSeek V4, Qwen 3.8 27B, Nemotron 3.5). Logging verified end to end.
-- **YOLO:** `yolo11n.pt` COCO weights, first inference about 1 s then fast. COCO has `person`,
-  `cell phone`, `cup`, `bottle`, `book`, no `face` or `hand`. Decision pending for Mon: face boxes
-  (a YOLO face checkpoint from HF) and hands (MediaPipe Hands or `yolo11n-pose` keypoints).
+- **YOLO:** switching to `yolo11n-pose.pt` (COCO keypoints: nose, eyes, ears, shoulders) for
+  head pose. Downloaded and loaded on 17 Oct. The detection model `yolo11n.pt` has no `face` or
+  `hand` class, which is why pose keypoints are the route.
+
+## Build plan, 17 Oct, in order (file by file)
+
+Steps 1 to 3 need nothing external. Step 4 needs Cosmos (team config or our pod) and clips.
+
+1. **Head pose from YOLO** (30 min)
+   - `perception/detector.py` edit: load `yolo11n-pose.pt`, return COCO keypoints with each box
+     (0 nose, 1 left eye, 2 right eye, 3 left ear, 4 right ear). Weights verified: 6 MB, 2 s load.
+   - `perception/pose.py` new: keypoints -> yaw and pitch proxies per frame, "facing" label
+     (up/down/left/right/centre), ear visibility.
+   - `.env.example`, `.env` edit: `YOLO_MODEL=yolo11n-pose.pt`.
+2. **Challenge and prompt** (15 min)
+   - `challenge/catalog.py` edit: single `head_circle` challenge; param `order` = shuffled
+     `["up", "down", "left", "right"]`; instruction and criteria templated on it.
+   - `reason/prompts.py` edit: `COHERENCE` rewritten for rigid head rotation (ears, nose, jaw
+     reveal and occlude consistently; texture stays attached at profile, no slide or flicker;
+     hair, neck, background move with the head); must cite frames; must say what would fail it.
+3. **Scoring** (15 min)
+   - `agent/loop.py` edit: `geometric_signal` -> pose gates (exactly one face throughout; each
+     direction reached; in the asked order; inside the window; smooth, no jumps between frames).
+     `combine` -> `score = cosmos * (0.3 + 0.7 * geo)`, `geo` graded 0..1 from gates met,
+     threshold 0.5, `ERROR` when no verdict.
+   - `tests/test_offline.py` edit: pose maths, gates, formula.
+4. **Real clips** (1 pm checkpoint)
+   - `data/clips/live_*.mp4`, `data/clips/attack_*.mp4` (gitignored), label in the filename.
+   - `scripts/smoke_pipeline.py` edit: drop `--challenge`; keep `--label`.
+   - `scripts/eval_clips.py` new: run every clip, print a table of score by label; tune prompt
+     and threshold until live and attack separate.
+5. **Live path and web UI** (2 h)
+   - `capture/frames.py` edit: `record_window(seconds, source=0)` webcam -> clip file.
+   - `ui/app.py` new: FastAPI; start session, stream feed, get verdict.
+   - `ui/static/index.html` new: feed, challenge line + countdown, verdict panel with cited frames.
+   - `agent/loop.py` edit: `run_session` also returns the cited frame indices.
+   - `Makefile` edit: `make ui`.
+6. **Agent in the loop** (45 min, if time)
+   - `agent/loop.py` edit: `AgentLLM` picks the direction order and writes the verdict paragraph.
+   - `reason/prompts.py` edit: the two prompts.
+7. **Track B, VM seat holder, in parallel** (see `tasks/todo.md`)
+   - `index/vast.py` new, `index/embed.py` new, `eval/vss_archive.py` new,
+     `index/__init__.py` edit (`vast` branch).
+8. **From 3:30:** freeze, backup video of the demo, rehearse. Submit at tokensand.com/vastlondon.
+
+Untouched: `config.py` beyond new settings, `reason/vlm.py`, `index/sqlite.py`,
+`eval/wandb_log.py`, the docs.
 
 ## Known gaps, in priority order
 
