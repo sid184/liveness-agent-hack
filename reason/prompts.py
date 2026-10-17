@@ -151,8 +151,8 @@ finance approver who is not technical. The caller was never asked to do anything
 watched the call in short windows. The decision is already made; do not change it.
 
 Decision: {decision}, assurance {assurance} (after {n} windows; a window needs score {threshold})
-Assurance: strong = the judge saw the caller in at least one hard moment (head turned, a hand or \
-cup at the face) and found it clean; basic = clean and alive but the caller stayed still, so a \
+Assurance: strong = the judge saw the caller in at least one hard moment (head turned, or a hand \
+at the face) and found it clean; basic = clean and alive but the caller stayed still, so a \
 still face swap is not ruled out.
 Windows, in order:
 {windows}

@@ -112,14 +112,14 @@ def main() -> None:
     print(f"{len(cases)} clips: {n_live} live, {len(cases) - n_live} attack; prompts {versions}")
 
     tracing.init()
-    detector, objects = Detector(), Detector(settings.yolo_detect_model)
+    detector = Detector()
     reasoner = VisionReasoner()
     video_judge = VisionReasoner(frame_format="video") if args.video_judge else None
     rows: list[dict[str, Any]] = []
     images = []
     for path, label, source in cases:
         t0 = time.perf_counter()
-        geo = observe(str(path), detector, objects)["geo"]
+        geo = observe(str(path), detector)["geo"]
         c = geo["cues"]
         row: dict[str, Any] = {
             "clip": path.name,
@@ -133,7 +133,6 @@ def main() -> None:
             "max_jump": geo["max_jump"],
             "measurable": geo["measurable_frames"] / max(geo["frames"], 1),
             "alive": geo["gates"]["alive"],
-            "device": c["device"] or "",
         }
         img = None
         for v in versions:

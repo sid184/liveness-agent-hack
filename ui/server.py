@@ -55,7 +55,6 @@ def _pipeline() -> dict[str, Any]:
         from reason import VisionReasoner
 
         _models["detector"] = Detector()
-        _models["objects"] = Detector(settings.yolo_detect_model)
         _models["reasoner"] = VisionReasoner()
         tracing.init()
         # One W&B run for the whole server process; every verdict is a row in it.
@@ -172,7 +171,6 @@ async def watch_window(
                 label=label if label in ("live", "attack") else None,
                 detector=models["detector"],
                 reasoner=models["reasoner"],
-                objects=models["objects"],
                 evidence_dir=folder,
                 call_id=call_id,
                 window_no=len(windows) + 1,

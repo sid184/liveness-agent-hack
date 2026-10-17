@@ -1,14 +1,12 @@
 """What YOLO alone can say about whether a caller is live. Pure functions, no model calls.
 
-Built from two YOLO passes over the same frames: pose (17 COCO keypoints) and detection (COCO
-classes). Each cue answers one attack:
+Built from YOLO pose (17 COCO keypoints) on the window's frames. Each cue answers one attack:
 
 - micro-motion  -> a photo or a frozen frame: a live head shifts against the shoulders and its
                    pose ratios wobble even when the person sits still; a flat photo moves rigidly
 - frozen        -> a frozen feed: consecutive frames are pixel-identical (a webcam never is)
-- device        -> a replay on a phone, monitor or laptop: the face sits inside that device's box
-- stress frames -> a live face swap: it breaks when the head turns or something crosses the face
-                   (a hand, a cup), so those frames are the ones Cosmos should judge
+- stress frames -> a live face swap: it breaks when the head turns or a hand crosses the face,
+                   so those frames are the ones Cosmos should judge
 
 Keypoints (COCO): 0 nose, 1/2 eyes, 3/4 ears, 5/6 shoulders, 9/10 wrists.
 """
@@ -25,8 +23,6 @@ from perception.pose import HeadPose, head_pose
 NOSE, L_SH, R_SH, L_WR, R_WR = 0, 5, 6, 9, 10
 MIN_CONF = 0.3
 
-DEVICES = frozenset({"cell phone", "tv", "laptop"})  # a face inside one of these is a replay
-HELD = frozenset({"cup", "bottle", "wine glass", "cell phone"})  # natural occluders near a face
 
 # Thresholds, from scripts/calibrate_cues.py on 17 Oct (3 team clips, plus a held photo and a
 # frozen frame made from each). Measured: live 0.37-0.49 / 0.24-0.41, live with the head held
@@ -38,8 +34,6 @@ MIN_HEAD_BODY = 0.06  # spread of the nose against the shoulders, summed over 3 
 # frozen feeds 0.02-0.22, held photos 6-10, live callers 10-32 (files and shared call windows).
 FROZEN_DIFF = 2.0  # below this = frozen
 HAND_RADIUS = 2.0  # a wrist within this many eye distances of the nose = hand at the face
-HELD_RADIUS = 2.5  # an object box edge within this many eye distances of the nose
-DEVICE_MIN_FRAMES = 2  # sampled frames with the face inside a device before it counts
 
 
 @dataclass
@@ -52,9 +46,6 @@ class FrameCue:
     face_shape: tuple[float, float] | None = None  # nose in the eyes' own frame, in eye distances
     head_body: tuple[float, float, float] | None = None  # nose vs shoulders, in shoulder widths
     hand_at_face: bool = False
-    object_at_face: str | None = None  # filled from the detection pass, sampled frames only
-    device_at_face: str | None = None
-    objects_checked: bool = False
 
     @property
     def turned(self) -> bool:
@@ -68,8 +59,6 @@ class FrameCue:
         out = []
         if self.hand_at_face:
             out.append("hand at face")
-        if self.object_at_face:
-            out.append(f"{self.object_at_face} at face")
         if self.turned and self.turn_counts:
             out.append(f"head turned {self.pose.facing}")
         return out
@@ -136,29 +125,6 @@ def cues_from_detections(per_frame: list[list[Detection]]) -> list[FrameCue]:
     return [frame_cue(main_person(dets)) for dets in per_frame]
 
 
-def _box_near(box: tuple[int, int, int, int], x: float, y: float, margin: float) -> bool:
-    x1, y1, x2, y2 = box
-    dx = max(x1 - x, 0, x - x2)
-    dy = max(y1 - y, 0, y - y2)
-    return (dx * dx + dy * dy) ** 0.5 <= margin
-
-
-def add_objects(cue: FrameCue, objects: list[Detection]) -> None:
-    """Mark a device around the face, or a held object near it, from one frame's detections."""
-    cue.objects_checked = True
-    if cue.nose is None or cue.eye_dist is None:
-        return
-    x, y = cue.nose
-    for d in sorted(objects, key=lambda d: -d.conf):
-        if d.label in DEVICES and _box_near(d.box, x, y, 0):  # the nose is inside the device
-            cue.device_at_face = d.label
-            return
-    for d in sorted(objects, key=lambda d: -d.conf):
-        if d.label in HELD and _box_near(d.box, x, y, HELD_RADIUS * cue.eye_dist):
-            cue.object_at_face = d.label
-            return
-
-
 def micro_motion(cues: list[FrameCue]) -> dict[str, float]:
     """How much a head moves even when 'still', measured so that moving the whole picture does
     not count: a photo held in a hand shifts, turns and zooms as one, and keeps both numbers at
@@ -187,7 +153,6 @@ def frame_diff(grey_frames: list[np.ndarray]) -> float:
 class CueSummary:
     micro: dict[str, float]
     frame_diff: float
-    devices: list[str] = field(default_factory=list)  # device label per sampled frame that had one
     stress_frames: int = 0
     stress_kinds: list[str] = field(default_factory=list)
 
@@ -201,10 +166,6 @@ class CueSummary:
     def frozen(self) -> bool:
         return self.frame_diff < FROZEN_DIFF
 
-    @property
-    def device(self) -> str | None:
-        return self.devices[0] if len(self.devices) >= DEVICE_MIN_FRAMES else None
-
 
 def summarise(cues: list[FrameCue], grey_frames: list[np.ndarray]) -> CueSummary:
     kinds: list[str] = []
@@ -216,7 +177,6 @@ def summarise(cues: list[FrameCue], grey_frames: list[np.ndarray]) -> CueSummary
     return CueSummary(
         micro=micro_motion(cues),
         frame_diff=frame_diff(grey_frames),
-        devices=[c.device_at_face for c in cues if c.device_at_face],
         stress_frames=sum(bool(c.stress) for c in cues),
         stress_kinds=kinds,
     )

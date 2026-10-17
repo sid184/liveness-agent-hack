@@ -172,7 +172,7 @@ function App() {
               {s.frames.length > 0 && (
                 <p className="mt-4 mb-1.5 text-xs text-muted">
                   The {s.frames.length} frames Cosmos saw, picked by YOLO: hard moments first (a
-                  hand or cup at the face, the furthest turns), then spread. Red = cited as evidence.
+                  hand at the face, the furthest turns), then spread. Red = cited as evidence.
                 </p>
               )}
               {s.frames.length > 0 && (

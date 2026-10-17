@@ -105,7 +105,6 @@ def test_geometric_signal_and_combine():
         "smooth": True,
         "alive": True,
         "not_frozen": True,
-        "no_device": True,
     }
     assert geo["moved"] is False and geo["cues"]["stress_frames"] == 0
     assert combine(geo, {"verdict": "PASS", "confidence": 0.9}) == ("PASS", 0.9)
@@ -116,15 +115,9 @@ def test_geometric_signal_and_combine():
     photo = geometric_signal([_cue() for _ in range(20)], frame_diff=2.0)
     assert photo["gates"]["alive"] is False
     assert combine(photo, {"verdict": "PASS", "confidence": 1.0}) == ("INCONCLUSIVE", 1.0)
-    # A frozen feed or a face inside a phone fails outright, even if Cosmos says PASS.
+    # A frozen feed fails outright, even if Cosmos says PASS.
     frozen = geometric_signal(still, frame_diff=0.0)
     assert combine(frozen, {"verdict": "PASS", "confidence": 1.0})[0] == "FAIL"
-    on_phone = geometric_signal(
-        [_cue(face=c.face_shape, body=c.head_body, device_at_face="cell phone") for c in still],
-        frame_diff=2.0,
-    )
-    assert on_phone["gates"]["no_device"] is False
-    assert combine(on_phone, {"verdict": "PASS", "confidence": 1.0})[0] == "FAIL"
     # A hand at the face is a hard frame: a clean PASS there is strong assurance.
     hand = [_cue(face=c.face_shape, body=c.head_body) for c in still]
     hand[5].hand_at_face = True
@@ -141,9 +134,9 @@ def test_geometric_signal_and_combine():
     assert combine(geometric_signal([]), {"verdict": None}) == ("ERROR", 0.0)
 
 
-def test_cues_from_keypoints_and_objects():
+def test_cues_from_keypoints():
     from perception import Detection
-    from perception.cues import add_objects, frame_cue, frame_diff, micro_motion
+    from perception.cues import frame_cue, frame_diff, micro_motion
 
     xy, cf = _kp((100, 132), (120, 100), (80, 100))
     xy[5], xy[6], cf[5], cf[6] = (140, 200), (60, 200), 0.9, 0.9  # shoulders
@@ -158,12 +151,6 @@ def test_cues_from_keypoints_and_objects():
     assert np.allclose(cue.face_shape, cue2.face_shape)
     assert np.allclose(cue.head_body, cue2.head_body)
     assert micro_motion([cue, cue2] * 3)["pose_jitter"] < 1e-6
-    # A face inside a phone's box is a device; a cup beside it is a held object.
-    add_objects(cue, [Detection("cell phone", 0.8, (60, 60, 160, 180))])
-    assert cue.device_at_face == "cell phone"
-    cue3 = frame_cue(Detection("person", 0.9, (0, 0, 200, 300), keypoints=xy, kp_conf=cf))
-    add_objects(cue3, [Detection("cup", 0.7, (150, 120, 190, 170))])
-    assert cue3.object_at_face == "cup" and "cup at face" in cue3.stress
     still = np.full((10, 10), 128, np.uint8)
     assert frame_diff([still] * 4) == 0.0
     assert frame_diff([still, still + 3, still]) == 3.0
@@ -336,7 +323,6 @@ def test_run_session_offline(tmp_path, monkeypatch):
     rec = loop.run_session(
         clip,
         detector=FakeDetector(),
-        objects=FakeDetector(),
         reasoner=FakeReasoner(),
         evidence_dir=tmp_path / "ev",
         archive=False,

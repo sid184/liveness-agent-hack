@@ -167,10 +167,9 @@ def main() -> None:
 
     tracing.init()
     detector, reasoner = Detector(), VisionReasoner()
-    objects = Detector(settings.yolo_detect_model)
 
     # YOLO once per clip: the geometry does not depend on the prompt.
-    seen = {clip: observe(str(clip), detector, objects) for clip in clips}
+    seen = {clip: observe(str(clip), detector) for clip in clips}
 
     group = f"eval-{time.strftime('%m%d-%H%M')}"
     summary: dict[str, dict[str, Any]] = {}
@@ -267,7 +266,6 @@ def main() -> None:
                 label=label_of(clip.name),
                 detector=detector,
                 reasoner=reasoner,
-                objects=objects,
                 prompt_version=args.index,
                 archive=args.archive,
                 evidence_dir=settings.data_dir / "sessions" / f"eval_{clip.stem}",

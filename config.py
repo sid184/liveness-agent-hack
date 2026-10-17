@@ -57,7 +57,6 @@ class Settings:
 
     # Perception
     yolo_model: str
-    yolo_detect_model: str  # COCO detection: phones, screens, cups near the face
 
     # Index
     index_backend: str  # sqlite | local | vast
@@ -112,7 +111,6 @@ def load_settings() -> Settings:
         weave_enabled=_flag("WEAVE_ENABLED", True),
         prompt_version=_env("PROMPT_VERSION", "v7"),
         yolo_model=_env("YOLO_MODEL", "yolo11n-pose.pt"),
-        yolo_detect_model=_env("YOLO_DETECT_MODEL", "yolo11n.pt"),
         index_backend=_env("INDEX_BACKEND", "sqlite"),
         vast_schema=_env("VAST_SCHEMA", "hackathon"),
         vast_table=_env("VAST_TABLE", "liveness_sessions"),

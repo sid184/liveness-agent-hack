@@ -17,7 +17,7 @@ export const media = (u: string) => `${API || location.origin}${u}`;
 
 export type Verdict = "PASS" | "FAIL" | "INCONCLUSIVE" | "ERROR";
 export type Decision = Verdict | "WATCHING";
-// strong: clean through a hard moment (head turned, hand or cup at the face); basic: clean and
+// strong: clean through a hard moment (head turned, or a hand at the face); basic: clean and
 // alive, but the caller stayed still.
 export type Assurance = "strong" | "basic";
 

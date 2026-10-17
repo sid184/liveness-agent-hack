@@ -48,14 +48,13 @@ def main() -> None:
     if args.wandb:
         wandb_log.start_run(name=f"smoke-{call_id}", config={"video": str(video)})
 
-    detector, objects = Detector(), Detector(settings.yolo_detect_model)
+    detector = Detector()
     reasoner = VisionReasoner()
     windows, decision = [], "WATCHING"
     for i, part in enumerate(parts, 1):
         rec = run_session(
             part,
             detector=detector,
-            objects=objects,
             reasoner=reasoner,
             n_frames=args.frames,
             label=args.label,

@@ -9,11 +9,11 @@ Passive liveness for video calls. The caller is never asked to do anything. Whil
 the agent records the caller's tile in back-to-back windows (8 s) and judges each:
 
 - YOLO pose + YOLO detection (`perception/cues.py`): one face, no jumps, natural micro-movement
-  (a held photo moves rigidly), not frozen (consecutive frames differ), no phone/monitor/laptop
-  around the face, and the hard moments (head turned, a hand or cup at the face).
+  (a held photo moves rigidly), not frozen (frames differ), and the hard moments (head turned,
+  a wrist at the face). No object detection pass (Karim, 17 Oct).
 - Cosmos judges the frames YOLO picked, hard moments first, with a checklist that works on a
   still frontal face too (prompt v6).
-- Window: FAIL on an artefact, a frozen feed or a device; INCONCLUSIVE without natural movement;
+- Window: FAIL on an artefact or a frozen feed; INCONCLUSIVE without natural movement;
   else PASS, with assurance **strong** (clean through a hard moment) or **basic** (clean and alive
   but still). Call: FAIL on the first failed window, PASS after two clean ones (strong if any
   window was), INCONCLUSIVE after six.
@@ -198,7 +198,7 @@ Untouched: `config.py` beyond new settings, `reason/vlm.py`, `index/sqlite.py`,
 
 1. **No real attack clips yet.** Verified on 17 Oct against fakes made from our own clips: 3
    frozen frames FAIL, 3 held photos never cleared (INCONCLUSIVE), live clips PASS strong.
-   Untested: a phone or monitor replay (device cue), a face swap, a hand or cup at the face.
+   Untested: a phone or monitor replay, a face swap, a hand crossing the face.
 2. The still-person thresholds rest on one 3 s still slice (`perception/cues.py`). Record 30 s of
    someone sitting still and talking, run `uv run python -m scripts.calibrate_cues`, re-check.
 3. A held photo ends INCONCLUSIVE, not FAIL. Failing "no natural movement for N windows" is a
