@@ -14,6 +14,8 @@ class Detection:
     conf: float
     box: tuple[int, int, int, int]  # x1, y1, x2, y2 in pixels
     track_id: int | None = None
+    keypoints: np.ndarray | None = None  # (17, 2) pixel xy, pose models only
+    kp_conf: np.ndarray | None = None  # (17,)
 
     @property
     def center(self) -> tuple[float, float]:
@@ -57,12 +59,24 @@ class Detector:
         if boxes is None or len(boxes) == 0:
             return []
         ids = boxes.id.int().tolist() if boxes.id is not None else [None] * len(boxes)
+        kps = res.keypoints
+        kp_xy = kps.xy.cpu().numpy() if kps is not None and kps.xy is not None else None
+        kp_cf = kps.conf.cpu().numpy() if kps is not None and kps.conf is not None else None
         out = []
-        for xyxy, c, k, tid in zip(
-            boxes.xyxy.tolist(), boxes.conf.tolist(), boxes.cls.tolist(), ids, strict=True
+        for i, (xyxy, c, k, tid) in enumerate(
+            zip(boxes.xyxy.tolist(), boxes.conf.tolist(), boxes.cls.tolist(), ids, strict=True)
         ):
             x1, y1, x2, y2 = (int(v) for v in xyxy)
-            out.append(Detection(self.names[int(k)], float(c), (x1, y1, x2, y2), tid))
+            out.append(
+                Detection(
+                    self.names[int(k)],
+                    float(c),
+                    (x1, y1, x2, y2),
+                    tid,
+                    keypoints=kp_xy[i] if kp_xy is not None else None,
+                    kp_conf=kp_cf[i] if kp_cf is not None else None,
+                )
+            )
         return out
 
     @staticmethod
@@ -71,6 +85,10 @@ class Detector:
         for d in detections:
             x1, y1, x2, y2 = d.box
             cv2.rectangle(out, (x1, y1), (x2, y2), (0, 200, 0), 2)
+            if d.keypoints is not None and d.kp_conf is not None:
+                for j in range(5):  # nose, eyes, ears
+                    if d.kp_conf[j] >= 0.3:
+                        cv2.circle(out, tuple(int(v) for v in d.keypoints[j]), 4, (0, 0, 255), -1)
             tag = f"{d.label} {d.conf:.2f}" + (f" #{d.track_id}" if d.track_id is not None else "")
             cv2.putText(
                 out,

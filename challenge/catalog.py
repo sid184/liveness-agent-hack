@@ -1,60 +1,44 @@
 from __future__ import annotations
 
+import itertools
 import random
 import time
 from dataclasses import dataclass, field
+
+DIRECTIONS = ("up", "down", "left", "right")
+# Every order of the four directions. The caller gets one at random so a recording of a previous
+# session, or a pre-rendered fake, cannot be replayed in the right sequence.
+ORDERS: tuple[tuple[str, ...], ...] = tuple(itertools.permutations(DIRECTIONS))
 
 
 @dataclass(frozen=True)
 class Challenge:
     id: str
-    instruction: str  # shown to the caller; may contain {n}
+    instruction: str  # shown to the caller; may contain {order_text}
     duration_s: float
     criteria: str  # natural-language pass criteria, given to the vision reasoner
-    objects: tuple[str, ...] = ()  # COCO class names YOLO should see crossing the face
-    params: dict = field(default_factory=dict)
+    params: dict = field(default_factory=dict)  # name -> tuple of allowed values
 
 
 CHALLENGES: list[Challenge] = [
     Challenge(
-        id="object_pass",
-        instruction=(
-            "Pick up your phone or a cup and pass it slowly in front of your face, left to right."
-        ),
-        duration_s=6,
+        id="head_circle",
+        instruction="Slowly turn your head {order_text}, pausing briefly at each.",
+        duration_s=10,
         criteria=(
-            "A handheld object crosses in front of the face and partially hides it for a few "
-            "frames. "
-            "The occlusion edge, lighting on the object and face, and the parallax between object "
-            "and head must stay consistent frame to frame."
+            "The head rotates as one rigid object through these directions in order: "
+            "{order_text}. Ears, nose and jawline appear and disappear the way a real 3D head "
+            "would. The face texture stays attached to the skull at every angle, with no "
+            "sliding, warping, flicker or blurring at the face boundary, especially at profile. "
+            "Hair, neck and background move consistently with the head and with each other."
         ),
-        objects=("cell phone", "cup", "bottle", "remote", "book"),
-    ),
-    Challenge(
-        id="head_turn",
-        instruction=(
-            "Turn your head slowly to the left, then to the right, "
-            "while moving the camera a little."
-        ),
-        duration_s=6,
-        criteria=(
-            "The head rotates left then right. Ears, nose and jawline change shape consistently "
-            "with "
-            "a real 3D head; the background shifts consistently with camera motion."
-        ),
-    ),
-    Challenge(
-        id="fingers",
-        instruction="Hold up {n} fingers right next to your face, then lower your hand.",
-        duration_s=5,
-        criteria=(
-            "A real hand appears next to the face showing exactly {n} extended fingers, with "
-            "lighting "
-            "and scale consistent with the face, then leaves the frame."
-        ),
-        params={"n": (2, 3, 4)},
+        params={"order": ORDERS},
     ),
 ]
+
+
+def order_text(order: tuple[str, ...] | list[str]) -> str:
+    return ", then ".join(order)
 
 
 @dataclass(frozen=True)
@@ -68,6 +52,10 @@ class IssuedChallenge:
     @property
     def id(self) -> str:
         return self.challenge.id
+
+    @property
+    def order(self) -> list[str]:
+        return list(self.params.get("order", DIRECTIONS))
 
     @property
     def deadline(self) -> float:
@@ -84,10 +72,13 @@ def issue(challenge_id: str | None = None, rng: random.Random | None = None) -> 
         if ch is None:
             raise KeyError(f"unknown challenge {challenge_id!r}")
     params = {k: rng.choice(v) for k, v in ch.params.items()}
+    fmt = dict(params)
+    if "order" in params:
+        fmt["order_text"] = order_text(params["order"])
     return IssuedChallenge(
         challenge=ch,
-        instruction=ch.instruction.format(**params),
-        criteria=ch.criteria.format(**params),
+        instruction=ch.instruction.format(**fmt),
+        criteria=ch.criteria.format(**fmt),
         params=params,
         issued_at=time.time(),
     )

@@ -83,7 +83,7 @@ def load_settings() -> Settings:
         agent_api_key=_env("AGENT_API_KEY") or _env("WANDB_API_KEY"),
         wandb_project=_env("WANDB_PROJECT", "liveness-agent"),
         wandb_entity=_env("WANDB_ENTITY"),
-        yolo_model=_env("YOLO_MODEL", "yolo11n.pt"),
+        yolo_model=_env("YOLO_MODEL", "yolo11n-pose.pt"),
         index_backend=_env("INDEX_BACKEND", "sqlite"),
         gpu_bearer_token=_env("GPU_BEARER_TOKEN"),
         cosmos3_reason_url=_env("COSMOS3_REASON_URL"),

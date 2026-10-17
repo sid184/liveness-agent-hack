@@ -1,9 +1,17 @@
-"""YOLO detection and tracking. Stock yolo11n weights are COCO-trained.
+"""YOLO pose: person boxes plus COCO keypoints (nose, eyes, ears, ...).
 
-COCO has 'person', 'cell phone', 'cup', 'bottle', 'book' and friends, but no 'face' or 'hand'.
-Face and hand localisation is a decision for Mon/Tue (see CLAUDE.md).
+`yolo11n-pose.pt` is the default. Head pose (yaw, pitch, facing) is derived in `pose.py`.
 """
 
 from perception.detector import Detection, Detector
+from perception.pose import HeadPose, directions_reached, head_pose, in_order, max_jump
 
-__all__ = ["Detection", "Detector"]
+__all__ = [
+    "Detection",
+    "Detector",
+    "HeadPose",
+    "directions_reached",
+    "head_pose",
+    "in_order",
+    "max_jump",
+]
