@@ -34,7 +34,9 @@ HELD = frozenset({"cup", "bottle", "wine glass", "cell phone"})  # natural occlu
 # Frame difference: live 1.1-9.3, frozen 0.00. Re-run on a truly still caller before trusting.
 MIN_POSE_JITTER = 0.10  # spread of the nose in the eyes' own frame, summed over 2 axes
 MIN_HEAD_BODY = 0.06  # spread of the nose against the shoulders, summed over 3 measures
-FROZEN_DIFF = 0.35  # median mean-abs difference of consecutive grey frames (0-255) below this
+# Re-measured 17 Oct on the 640 px recordings the UI makes: a real caller holding still reads
+# 0.32-0.49, a frozen feed 0.00-0.007. 0.35 failed a still human; 0.05 sits between the two.
+FROZEN_DIFF = 0.05  # median mean-abs difference of consecutive grey frames (0-255) below this
 HAND_RADIUS = 2.0  # a wrist within this many eye distances of the nose = hand at the face
 HELD_RADIUS = 2.5  # an object box edge within this many eye distances of the nose
 DEVICE_MIN_FRAMES = 2  # sampled frames with the face inside a device before it counts

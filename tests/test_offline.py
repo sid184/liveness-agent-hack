@@ -118,9 +118,9 @@ def test_geometric_signal_and_combine():
     photo = geometric_signal([_cue() for _ in range(20)], frame_diff=2.0)
     assert photo["gates"]["alive"] is False
     assert combine(photo, {"verdict": "PASS", "confidence": 1.0}) == ("INCONCLUSIVE", 1.0)
-    # A frozen feed or a face inside a phone fails outright, even if Cosmos says PASS.
+    # A frozen feed never clears but is not proof of a fake (a real call can stall); keep watching.
     frozen = geometric_signal(still, frame_diff=0.0)
-    assert combine(frozen, {"verdict": "PASS", "confidence": 1.0})[0] == "FAIL"
+    assert combine(frozen, {"verdict": "PASS", "confidence": 1.0})[0] == "INCONCLUSIVE"
     on_phone = geometric_signal(
         [_cue(face=c.face_shape, body=c.head_body, device_at_face="cell phone") for c in still],
         frame_diff=2.0,

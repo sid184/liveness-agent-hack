@@ -154,9 +154,14 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
     cosmos = conf if vlm["verdict"] == "PASS" else 1 - conf
     gates = geo.get("gates") or {}
     score = round(cosmos * (1.0 if gates.get("smooth", True) else JUMP_PENALTY), 3)
-    hard_fail = not gates.get("no_device", True) or not gates.get("not_frozen", True)
+    hard_fail = not gates.get("no_device", True)  # the face inside a phone, laptop or monitor
     if vlm["verdict"] == "FAIL" or score < THRESHOLD or hard_fail:
         return "FAIL", score
+    if not gates.get("not_frozen", True):
+        # Pixel-identical frames: a frozen feed, or a real call stalling for a moment. It cannot
+        # clear the caller (no hard frame can come from a frozen image) but it is not proof of a
+        # fake on its own, so keep watching rather than fail a real person on a network stall.
+        return "INCONCLUSIVE", score
     if not (gates.get("one_face", True) and gates.get("alive", True)):
         return "INCONCLUSIVE", score
     if not (geo.get("cues") or {}).get("stress_frames"):
