@@ -6,12 +6,20 @@ work is tracked in `tasks/todo.md`; corrections go in `tasks/lessons.md`.
 ## What this is
 
 Passive liveness for video calls. The caller is never asked to do anything. While the call runs,
-the agent records the caller's tile in back-to-back windows (8 s) and judges each from natural
-head movement: YOLO pose gates (one face, no jumps, enough movement to judge), YOLO picks the
-most-turned frames, Cosmos judges whether the head moves like a real 3D head. The call is decided
-FAIL on the first failed window, PASS after two clean windows, INCONCLUSIVE after six without
-either. The agent (W&B Inference) writes the decision note with similar past windows in context.
-Every window is logged (VastDB), archived (VSS), traced (Weave) and mirrored to W&B.
+the agent records the caller's tile in back-to-back windows (8 s) and judges each:
+
+- YOLO pose + YOLO detection (`perception/cues.py`): one face, no jumps, natural micro-movement
+  (a held photo moves rigidly), not frozen (consecutive frames differ), no phone/monitor/laptop
+  around the face, and the hard moments (head turned, a hand or cup at the face).
+- Cosmos judges the frames YOLO picked, hard moments first, with a checklist that works on a
+  still frontal face too (prompt v6).
+- Window: FAIL on an artefact, a frozen feed or a device; INCONCLUSIVE without natural movement;
+  else PASS, with assurance **strong** (clean through a hard moment) or **basic** (clean and alive
+  but still). Call: FAIL on the first failed window, PASS after two clean ones (strong if any
+  window was), INCONCLUSIVE after six.
+
+The agent (W&B Inference) writes the decision note with similar past windows in context. Every
+window is logged (VastDB), archived (VSS), traced (Weave) and mirrored to W&B.
 
 **Pivots on 17 Oct (build day):** first the three-challenge catalogue became one head-circle
 challenge with a shuffled order; then (midday) challenges were dropped altogether for passive
@@ -188,16 +196,16 @@ Untouched: `config.py` beyond new settings, `reason/vlm.py`, `index/sqlite.py`,
 
 ## Known gaps, in priority order
 
-1. **No attack clips yet.** Every clip so far is a real person, and all pass (window scores
-   0.9-0.95). Whether Cosmos catches a face swap or a screen replay is untested. Record and tag
-   attack clips, then `make eval ARGS="--from-vss"` (v1 vs v4 vs v5 in W&B).
-2. The overlay has not been tried on a real call (Meet between two laptops); the window loop runs
-   in the setup tab, whose timers Chrome throttles when hidden (recording timers use the PiP
-   window's, as before).
-3. Scoring constants (`agent/loop.py`: threshold 0.5, jump penalty 0.5, motion 0.5 yaw / 0.4
-   pitch, 2 passes, 6 windows) are set from three live clips; tune on labelled ones.
-4. A caller who sits still for six windows gets INCONCLUSIVE; there is no fallback yet (the old
-   head-circle challenge would be the natural one, kept in git history).
+1. **No real attack clips yet.** Verified on 17 Oct against fakes made from our own clips: 3
+   frozen frames FAIL, 3 held photos never cleared (INCONCLUSIVE), live clips PASS strong.
+   Untested: a phone or monitor replay (device cue), a face swap, a hand or cup at the face.
+2. The still-person thresholds rest on one 3 s still slice (`perception/cues.py`). Record 30 s of
+   someone sitting still and talking, run `uv run python -m scripts.calibrate_cues`, re-check.
+3. A held photo ends INCONCLUSIVE, not FAIL. Failing "no natural movement for N windows" is a
+   one-line change once (2) shows real still callers stay well above the threshold.
+4. Cosmos says PASS on photos and frozen frames (it judges what it sees, and a photo of a person
+   looks fine); YOLO's cues carry those attacks. Cosmos earns its place on hard moments.
+5. Scoring constants are untuned on labelled clips; the overlay is untried on a real Meet call.
 
 ## Demo script (under four minutes)
 

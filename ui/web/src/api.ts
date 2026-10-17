@@ -17,6 +17,9 @@ export const media = (u: string) => `${API || location.origin}${u}`;
 
 export type Verdict = "PASS" | "FAIL" | "INCONCLUSIVE" | "ERROR";
 export type Decision = Verdict | "WATCHING";
+// strong: clean through a hard moment (head turned, hand or cup at the face); basic: clean and
+// alive, but the caller stayed still.
+export type Assurance = "strong" | "basic";
 
 export interface Summary {
   session_id: string;
@@ -27,6 +30,9 @@ export interface Summary {
   reasoning: string;
   created_at: number;
   label: string | null;
+  windows?: number | null; // a decided call: how many windows it took
+  assurance?: Assurance | null;
+  window_no?: number | null;
 }
 
 export interface Watch {
@@ -69,13 +75,24 @@ export interface Session extends Summary {
       geo?: number;
       yaw_range?: number;
       pitch_range?: number;
+      cues?: {
+        pose_jitter?: number;
+        head_body?: number;
+        frame_diff?: number;
+        frozen?: boolean;
+        device?: string | null;
+        stress_frames?: number;
+        stress_kinds?: string[];
+      };
     };
+    frame_notes?: string[];
     call_id?: string | null;
     window_no?: number;
     window_verdict?: Verdict;
     call?: {
       decision: Verdict;
-      windows: { session_id: string; verdict: Verdict; score: number }[];
+      assurance?: Assurance | null;
+      windows: { session_id: string; verdict: Verdict; score: number; assurance?: Assurance | null }[];
       agent?: { text?: string; model?: string; error?: string };
     };
     vlm?: { observed?: string; artifacts?: string | null; verdict?: string; confidence?: number };
@@ -107,3 +124,13 @@ export async function getJSON<T>(url: string, init?: RequestInit): Promise<T> {
   if (!r.ok) throw new Error(body.detail || `${url} ${r.status}`);
   return body as T;
 }
+
+// One line for a list row: the decision note's first sentence, else Cosmos's observation.
+export const firstSentence = (t: string, max = 140) => {
+  const one = (t || "").split(/(?<=[.!?])\s/)[0];
+  return one.length > max ? one.slice(0, max - 1) + "…" : one;
+};
+
+export const shape = (s: Summary) =>
+  (s.windows ? `call · ${s.windows} window${s.windows > 1 ? "s" : ""}` : "single window") +
+  (s.assurance ? ` · ${s.assurance} assurance` : "");

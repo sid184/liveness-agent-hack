@@ -124,7 +124,7 @@ def vss() -> str:
     from eval import vss_archive
 
     _need("ingress_url", "team_username", "team_password")
-    items = vss_archive.explore(scope="mine", limit=100)
+    items = vss_archive.explore(scope="mine")
     return f"logged in as {settings.team_username}, {len(items)} indexed uploads visible"
 
 

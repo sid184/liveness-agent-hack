@@ -77,7 +77,6 @@ function App() {
   const [pip, setPip] = useState<Window | null>(null);
   const [active, setActive] = useState(false); // overlay started (floating or inline)
   const [ov, setOvRaw] = useState<OverlayState>({ kind: "dormant" });
-  const [label, setLabel] = useState("");
   const [status, setStatus] = useState("");
   const [recent, setRecent] = useState<Summary[]>([]);
 
@@ -86,10 +85,8 @@ function App() {
   const audio = useRef<AudioContext | null>(null);
   const busy = useRef(false);
   const seq = useRef(0); // guards the delayed PASS collapse against newer states
-  const gen = useRef(0); // bumped by End session; a check from an older session drops out
+  const gen = useRef(0); // bumped by End session; a call still being watched drops out
   const pipRef = useRef<Window | null>(null);
-  const labelRef = useRef(label);
-  labelRef.current = label;
 
   // Timers run in the overlay window: the setup tab is usually hidden behind the call and
   // background tabs have their timers throttled.
@@ -145,7 +142,7 @@ function App() {
         pipRef.current = null;
         setPip(null);
         setActive(false);
-        setStatus("Overlay closed. Start it again to keep checking.");
+        setStatus("Overlay closed. Start it again to keep watching.");
       });
       pipRef.current = win;
       setPip(win);
@@ -199,7 +196,6 @@ function App() {
         const form = new FormData();
         form.append("call_id", w.call_id);
         form.append("clip", clip, "clip");
-        if (labelRef.current) form.append("label", labelRef.current);
         try {
           const out = await getJSON<WindowResult>("/api/watch/window", {
             method: "POST",
@@ -228,7 +224,7 @@ function App() {
       if (!out) throw new Error("the call ended without a decision");
 
       if (out.decision === "PASS") {
-        const mine = setOv({ kind: "pass", score: out.score });
+        const mine = setOv({ kind: "pass", score: out.score, assurance: out.assurance });
         await sleep(4000);
         if (mine === seq.current && !ended()) setOv({ kind: "dormant" });
       } else {
@@ -381,35 +377,15 @@ function App() {
               </span>
             </div>
             <ol className="mt-3 mb-5 flex list-none items-center justify-between gap-1 p-0 font-mono text-[11px] text-muted">
-              <Flow dot="bg-accent" label="Dot waits" />
+              <Flow dot="bg-accent" label="Agent watches" />
               <Arrow />
-              <Flow dot="bg-warn" label="Agent watches" />
+              <Flow dot="bg-warn" label="Decides in 2-6 windows" />
               <Arrow />
               <Flow dot="bg-bad" label="Only FAIL stays" />
             </ol>
 
             <div className="mt-auto">
-              <div className="mb-2 font-mono text-[11px] uppercase tracking-widest text-muted">
-                Ground truth <span className="normal-case tracking-normal">(eval only)</span>
-              </div>
-              <div className="grid grid-cols-3 rounded-lg border border-line bg-black/30 p-0.5">
-                {[
-                  ["", "none"],
-                  ["live", "live"],
-                  ["attack", "attack"],
-                ].map(([v, t]) => (
-                  <button
-                    key={v}
-                    onClick={() => setLabel(v)}
-                    className={`cursor-pointer rounded-md py-1.5 font-mono text-xs transition-colors ${
-                      label === v ? "bg-accent/15 text-accent" : "text-muted hover:text-ink"
-                    }`}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-              <p className="mt-3 mb-0 text-xs text-muted">
+              <p className="mt-0 mb-0 text-xs text-muted">
                 Watching starts with the overlay. Click the dot to watch again, or start it from
                 another system with{" "}
                 <code className="rounded bg-black/40 px-1 font-mono text-accent/80">
@@ -425,13 +401,13 @@ function App() {
 
         <Panel className="mt-6">
           <PanelTitle aside={recent.length > 0 && <span>{recent.length}</span>}>
-            Recent verdicts
+            Recent calls
           </PanelTitle>
           {recent.length ? (
             <SessionList items={recent} maxHeight={320} />
           ) : (
             <p className="m-0 text-sm text-muted">
-              No checks yet. Verdicts show up here, each linked to its full review.
+              No calls yet. Each decision shows up here, linked to its full review.
             </p>
           )}
         </Panel>

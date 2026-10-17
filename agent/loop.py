@@ -26,7 +26,8 @@ from eval import tracing, vss_archive
 from eval.tracing import op
 from index import SessionRecord, get_index
 from index.embed import embed
-from perception import Detection, Detector, HeadPose, head_pose, max_jump, motion_range
+from perception import Detection, Detector, HeadPose, max_jump, motion_range
+from perception.cues import FrameCue, add_objects, cues_from_detections, frame_diff, summarise
 from reason import VisionReasoner
 from reason.prompts import COHERENCE_VERSIONS
 
@@ -41,11 +42,11 @@ THRESHOLD = 0.5
 JUMP_PENALTY = 0.5  # a cut or glitch between frames halves the Cosmos score
 MAX_JUMP = 0.8  # (yaw, pitch) jump between geometry frames above this is a cut, replay or glitch
 MIN_FACE_FRACTION = 0.9  # frames in which exactly one face must be measurable
-# Natural head movement needed before a PASS counts. A still talking head shows Cosmos no 3D
-# structure to judge. Measured 17 Oct: deliberate turns span yaw 1.0 to 1.2.
+# A visible head turn (informational: stress frames, not this, decide the assurance level).
 MIN_YAW_RANGE = 0.5
 MIN_PITCH_RANGE = 0.4
 N_GEO_FRAMES = 40  # YOLO is cheap: about 4 fps over a 10 s clip, enough to see jumps
+OBJECT_EVERY = 4  # the detection pass (devices, cups) runs on every 4th pose frame
 
 # Call decision.
 WINDOW_S = 8  # seconds per recorded window
@@ -61,7 +62,8 @@ def parse_verdict(text: str) -> dict[str, Any]:
     if answer:
         text = answer.group(1)
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
-    fields = {k.lower(): v.strip() for k, v in _FIELD.findall(text)}
+    # Models sometimes copy the template's angle brackets: "VERDICT: <PASS>", "ARTIFACTS: <none>".
+    fields = {k.lower(): v.strip().strip("<>").strip() for k, v in _FIELD.findall(text)}
     verdict = (fields.get("verdict") or "").upper()
     conf_match = re.search(r"\d+", fields.get("confidence") or "")
     artifacts = fields.get("artifacts")
@@ -80,28 +82,36 @@ def parse_verdict(text: str) -> dict[str, Any]:
 
 
 def poses_from_detections(per_frame: list[list[Detection]]) -> list[HeadPose | None]:
-    """One head pose per frame from the most confident person, None when not measurable."""
-    out: list[HeadPose | None] = []
-    for dets in per_frame:
-        people = sorted((d for d in dets if d.keypoints is not None), key=lambda d: -d.conf)
-        if len(people) != 1:
-            out.append(None)  # nobody, or more than one person: not a clean measurement
-            continue
-        p = people[0]
-        out.append(head_pose(p.keypoints, p.kp_conf))
-    return out
+    """One head pose per frame from the single person in it, None when not measurable."""
+    return [c.pose for c in cues_from_detections(per_frame)]
 
 
-def geometric_signal(poses: list[HeadPose | None]) -> dict[str, Any]:
-    """What the keypoint detector alone can say. Three gates, each a boolean, plus a 0..1 grade."""
+def geometric_signal(cues: list[FrameCue], frame_diff: float | None = None) -> dict[str, Any]:
+    """What YOLO alone can say: five gates, the cues behind them, and a 0..1 grade.
+
+    one_face   exactly one person measurable in most frames
+    smooth     no jump between frames (a cut, splice or glitch)
+    alive      natural micro-movement: rules out a held photo
+    not_frozen consecutive frames differ: rules out a frozen feed
+    no_device  the face is not inside a phone, monitor or laptop: rules out a screen replay
+    """
+    poses = [c.pose for c in cues]
+    yaw_range, pitch_range = motion_range(poses)
+    moved = yaw_range >= MIN_YAW_RANGE or pitch_range >= MIN_PITCH_RANGE
+    for c in cues:
+        c.turn_counts = moved  # a turned head that never moved is a photo of one, not a turn
+    summary = summarise(cues, [])
+    if frame_diff is not None:
+        summary.frame_diff = frame_diff
     n = len(poses)
     measurable = sum(p is not None for p in poses)
     jump = max_jump(poses)
-    yaw_range, pitch_range = motion_range(poses)
     gates = {
         "one_face": n > 0 and measurable / n >= MIN_FACE_FRACTION,
         "smooth": measurable >= 2 and jump <= MAX_JUMP,
-        "moved": yaw_range >= MIN_YAW_RANGE or pitch_range >= MIN_PITCH_RANGE,
+        "alive": summary.alive,
+        "not_frozen": frame_diff is None or not summary.frozen,
+        "no_device": summary.device is None,
     }
     return {
         "frames": n,
@@ -109,7 +119,17 @@ def geometric_signal(poses: list[HeadPose | None]) -> dict[str, Any]:
         "sequence": [p.facing if p else "?" for p in poses],
         "yaw_range": round(yaw_range, 3),
         "pitch_range": round(pitch_range, 3),
+        "moved": moved,
         "max_jump": round(jump, 3),
+        "cues": summary.micro
+        | {
+            "frame_diff": summary.frame_diff,
+            "frozen": not gates["not_frozen"],
+            "device": summary.device,
+            "stress_frames": summary.stress_frames,
+            "stress_kinds": summary.stress_kinds,
+        },
+        "stress_track": [c.stress for c in cues],
         "gates": gates,
         "geo": round(sum(gates.values()) / len(gates), 3),
     }
@@ -118,10 +138,10 @@ def geometric_signal(poses: list[HeadPose | None]) -> dict[str, Any]:
 def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
     """One window's verdict: PASS | FAIL | INCONCLUSIVE | ERROR, and a 0..1 score.
 
-    Cosmos decides realism; the score is its confidence that the caller is real, halved when
-    YOLO saw a jump. A Cosmos FAIL always stands: it saw an artefact. A PASS only counts when
-    YOLO saw exactly one face that moved enough to judge; otherwise the window is INCONCLUSIVE
-    and the agent keeps watching.
+    FAIL on hard evidence: Cosmos names an artefact, the face is inside a device, the feed is
+    frozen, or the score is under the threshold (a jump between frames halves it). PASS needs one
+    face showing natural micro-movement; without it the window is INCONCLUSIVE and the agent
+    keeps watching. A still head is fine: `assurance` says how strong a PASS is.
     """
     if vlm.get("verdict") is None:
         return "ERROR", 0.0
@@ -129,11 +149,21 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
     cosmos = conf if vlm["verdict"] == "PASS" else 1 - conf
     gates = geo.get("gates") or {}
     score = round(cosmos * (1.0 if gates.get("smooth", True) else JUMP_PENALTY), 3)
-    if vlm["verdict"] == "FAIL" or score < THRESHOLD:
+    hard_fail = not gates.get("no_device", True) or not gates.get("not_frozen", True)
+    if vlm["verdict"] == "FAIL" or score < THRESHOLD or hard_fail:
         return "FAIL", score
-    if not (gates.get("one_face", True) and gates.get("moved", True)):
+    if not (gates.get("one_face", True) and gates.get("alive", True)):
         return "INCONCLUSIVE", score
     return "PASS", score
+
+
+def assurance(geo: dict[str, Any], verdict: str) -> str | None:
+    """How strong a PASS is. strong: Cosmos judged at least one stress frame (head turned, hand
+    or object at the face) and found it clean, which is where a face swap breaks. basic: clean
+    and alive, but the caller never gave a hard frame, so a still face swap is not ruled out."""
+    if verdict != "PASS":
+        return None
+    return "strong" if (geo.get("cues") or {}).get("stress_frames") else "basic"
 
 
 def decide_call(verdicts: list[str]) -> str:
@@ -161,6 +191,19 @@ def _where(url: str) -> str:
     return urlparse(url).netloc or url
 
 
+def _cue_line(geo: dict[str, Any], passed: int) -> str:
+    c = geo.get("cues") or {}
+    bits = [f"{passed}/{len(geo['gates'])} gates over {geo['frames']} frames"]
+    bits.append("alive" if geo["gates"].get("alive") else "no natural movement")
+    if c.get("frozen"):
+        bits.append("frozen feed")
+    if c.get("device"):
+        bits.append(f"face inside a {c['device']}")
+    if c.get("stress_frames"):
+        bits.append(f"{c['stress_frames']} hard frames ({', '.join(c.get('stress_kinds') or [])})")
+    return "; ".join(bits)
+
+
 def _stage(step: str, component: str, t0: float, **detail: Any) -> dict[str, Any]:
     return {
         "step": step,
@@ -169,40 +212,52 @@ def _stage(step: str, component: str, t0: float, **detail: Any) -> dict[str, Any
     } | {k: v for k, v in detail.items() if v is not None}
 
 
-@op("yolo.pose_gates", drop=("detector",))
-def observe(video_path: str, detector: Detector) -> dict[str, Any]:
-    """YOLO pose on a dense sample: per-frame head pose and the three gates."""
+@op("yolo.pose_gates", drop=("detector", "objects"))
+def observe(video_path: str, detector: Detector, objects: Detector | None = None) -> dict[str, Any]:
+    """Two YOLO passes over a dense sample: pose on every frame (head, shoulders, wrists), object
+    detection on every OBJECT_EVERY-th (phones, screens, cups). Gates, cues and per-frame
+    stress flags come out; Cosmos is told which frames are the hard ones."""
     geo_frames = sample_frames(video_path, N_GEO_FRAMES)
-    per_frame = [detector.detect(f.image) for f in geo_frames]
-    poses = poses_from_detections(per_frame)
-    geo = geometric_signal(poses)
+    cues = cues_from_detections([detector.detect(f.image) for f in geo_frames])
+    if objects is not None:
+        for i in range(0, len(geo_frames), OBJECT_EVERY):
+            add_objects(cues[i], objects.detect(geo_frames[i].image))
+    # Frozen check on 8 consecutive video frames (the pose sample is spread out in time).
+    start = geo_frames[len(geo_frames) // 2].index if geo_frames else 0
+    consecutive = read_frames(video_path, [start + k for k in range(8)])
+    grey = [cv2.cvtColor(cv2.resize(f.image, (320, 180)), cv2.COLOR_BGR2GRAY) for f in consecutive]
+    geo = geometric_signal(cues, frame_diff(grey))
     geo["frame_indices"] = [f.index for f in geo_frames]
-    geo["pose_track"] = [None if p is None else [p.yaw, p.pitch] for p in poses]
-    return {"geo": geo, "poses": poses}
+    geo["pose_track"] = [None if c.pose is None else [c.pose.yaw, c.pose.pitch] for c in cues]
+    return {"geo": geo, "poses": [c.pose for c in cues]}
 
 
 def pick_frames(geo: dict[str, Any], n: int) -> list[int]:
-    """Which video frames Cosmos sees: the most-turned moments first (furthest left, right, up and
-    down, where a face swap breaks), then evenly spread fill, in time order. Falls back to an even
-    spread when YOLO measured nothing."""
+    """Which video frames Cosmos sees, in time order: stress frames first (a hand or object at
+    the face, then the furthest turns left, right, up and down), where a face swap breaks;
+    then evenly spread fill. Falls back to an even spread when YOLO measured nothing."""
     idx = geo.get("frame_indices") or []
     track = geo.get("pose_track") or []
+    stress = geo.get("stress_track") or [[] for _ in idx]
     if not idx:
         return []
     if n >= len(idx):
         return list(idx)
-    valid = [k for k, t in enumerate(track) if t]
     chosen: list[int] = []
+
+    def take(k: int) -> None:
+        if k not in chosen and len(chosen) < n and all(abs(k - c) > 1 for c in chosen):
+            chosen.append(k)
+
+    for k, why in enumerate(stress):  # occlusions first: the hardest thing for a swap
+        if any(" at face" in w for w in why):
+            take(k)
+    valid = [k for k, t in enumerate(track) if t]
     if valid:
         for axis, pick in ((0, max), (0, min), (1, max), (1, min)):
-            k = pick(valid, key=lambda k, a=axis: track[k][a])
-            if k not in chosen and len(chosen) < n:
-                chosen.append(k)
+            take(pick(valid, key=lambda k, a=axis: track[k][a]))
     for k in np.linspace(0, len(idx) - 1, n).round().astype(int):
-        if len(chosen) >= n:
-            break
-        if all(abs(int(k) - c) > 1 for c in chosen):
-            chosen.append(int(k))
+        take(int(k))
     for k in range(len(idx)):  # still short (tiny clips): anything not yet taken
         if len(chosen) >= n:
             break
@@ -228,18 +283,22 @@ def judge(
     picked = pick_frames(geo, n_frames)
     frames = read_frames(video_path, picked) if picked else sample_frames(video_path, n_frames)
     geo_idx = geo.get("frame_indices") or []
-    facing_at = []
+    stress = geo.get("stress_track") or []
+    facing_at, notes = [], []
     for f in frames:
         if not geo_idx:
             facing_at.append("?")
+            notes.append("?")
             continue
         j = min(range(len(geo_idx)), key=lambda k: abs(geo_idx[k] - f.index))
         facing_at.append(geo["sequence"][j])
+        extra = [w for w in (stress[j] if j < len(stress) else []) if " at face" in w]
+        notes.append(", ".join([f"head {geo['sequence'][j]}"] + extra))
     duration = frames[-1].t_seconds - frames[0].t_seconds if len(frames) > 1 else 0.0
     prompt = template.format(
         instruction=INSTRUCTION,
         criteria="The head moves as one rigid 3D object, with nothing sliding or flickering.",
-        observed_sequence=", ".join(f"{i + 1}:{s}" for i, s in enumerate(facing_at)),
+        observed_sequence="; ".join(f"{i + 1}: {s}" for i, s in enumerate(notes)),
         n=len(frames),
         duration=duration,
     )
@@ -247,19 +306,21 @@ def judge(
     return {
         "frames": frames,
         "facing_at": facing_at,
+        "frame_notes": notes,
         "result": result,
         "vlm": parse_verdict(result.text),
         "prompt_version": version,
     }
 
 
-@op("liveness_window", drop=("detector", "reasoner"))
+@op("liveness_window", drop=("detector", "reasoner", "objects"))
 def run_session(
     video_path: str | Path,
     n_frames: int = 12,
     label: str | None = None,
     detector: Detector | None = None,
     reasoner: VisionReasoner | None = None,
+    objects: Detector | None = None,
     evidence_dir: str | Path | None = None,
     prompt_version: str | None = None,
     archive: bool | None = None,
@@ -275,11 +336,12 @@ def run_session(
     tracing.init()
     video_path = str(video_path)
     detector = detector or Detector()
+    objects = objects or Detector(settings.yolo_detect_model)
     reasoner = reasoner or VisionReasoner()
     stack: list[dict[str, Any]] = []
 
     t0 = time.perf_counter()
-    seen = observe(video_path, detector)
+    seen = observe(video_path, detector, objects)
     geo, poses = seen["geo"], seen["poses"]
     passed = sum(geo["gates"].values())
     stack.append(
@@ -287,8 +349,7 @@ def run_session(
             "Head-pose gates",
             f"YOLO11 pose · {Path(settings.yolo_model).stem} · local",
             t0,
-            detail=f"{passed}/{len(geo['gates'])} gates over {geo['frames']} frames, "
-            f"head turned yaw {geo['yaw_range']:.2f} pitch {geo['pitch_range']:.2f}",
+            detail=_cue_line(geo, passed),
         )
     )
 
@@ -305,6 +366,7 @@ def run_session(
         )
     )
     verdict, score = combine(geo, vlm)
+    level = assurance(geo, verdict)
 
     evidence = [video_path]
     if evidence_dir is not None:
@@ -325,6 +387,7 @@ def run_session(
         signals={
             "call_id": call_id,
             "window_no": window_no,
+            "assurance": level,
             "geometric": geo,
             "vlm": vlm,
             "vlm_raw": result.text,
@@ -335,6 +398,7 @@ def run_session(
             "threshold": THRESHOLD,
             "frame_indices": [f.index for f in frames],
             "facing_at_frames": judged["facing_at"],
+            "frame_notes": judged["frame_notes"],
             "poses": [
                 None if p is None else {"yaw": p.yaw, "pitch": p.pitch, "facing": p.facing}
                 for p in poses
@@ -384,17 +448,28 @@ def finish_call(windows: list[SessionRecord], decision: str, persist: bool = Tru
     window, which is the one the overlay links to. The decision itself is `decide_call`'s."""
     last = windows[-1]
     index = get_index() if persist else None
+    levels = [w.signals.get("assurance") for w in windows]
+    level = None
+    if decision == "PASS":
+        level = "strong" if "strong" in levels else "basic"
     call = {
         "decision": decision,
+        "assurance": level,
         "windows": [
-            {"session_id": w.session_id, "verdict": w.verdict, "score": w.score} for w in windows
+            {
+                "session_id": w.session_id,
+                "verdict": w.verdict,
+                "score": w.score,
+                "assurance": w.signals.get("assurance"),
+            }
+            for w in windows
         ],
     }
     if agent_llm.enabled():
         t0 = time.perf_counter()
         similar = index.similar(last, k=3) if index is not None else []
         similar = [r for r in similar if r.signals.get("call_id") != last.signals.get("call_id")]
-        note = agent_llm.write_verdict(windows, decision, similar, THRESHOLD)
+        note = agent_llm.write_verdict(windows, decision, similar, THRESHOLD, level)
         if note:
             call["agent"] = note
             if note.get("text"):
@@ -407,7 +482,7 @@ def finish_call(windows: list[SessionRecord], decision: str, persist: bool = Tru
                     f"Agent · {note.get('model') or settings.agent_model} · W&B Inference",
                     t0,
                     detail=note.get("error")
-                    or f"{decision} over {len(windows)} windows; "
+                    or f"{decision}{f' ({level})' if level else ''} over {len(windows)} windows; "
                     f"{len(similar)} similar past windows from {source}",
                 ),
             )

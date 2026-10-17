@@ -35,6 +35,10 @@ def test_parse_verdict():
         is None
     )
     assert parse_verdict("garbage")["verdict"] is None
+    bracketed = parse_verdict(
+        "OBSERVED: <still>\nARTIFACTS: <none>\nVERDICT: <PASS>\nCONFIDENCE: 95"
+    )
+    assert bracketed["verdict"] == "PASS" and bracketed["artifacts"] is None
 
 
 def _kp(nose, le, re_, l_ear=None, r_ear=None):
@@ -63,33 +67,96 @@ def test_head_pose_directions():
     assert head_pose(*_kp((100, 132), None, (80, 100))) is None
 
 
+def _cue(yaw=0.0, pitch=0.0, face=(0.0, 0.0), body=(0.0, -0.6, 0.4), **kw):
+    from perception.cues import FrameCue
+
+    return FrameCue(
+        pose=HeadPose(yaw, pitch, True, True, 0.9),
+        nose=(100.0, 100.0),
+        eye_dist=40.0,
+        face_shape=face,
+        head_body=body,
+        **kw,
+    )
+
+
 def test_geometric_signal_and_combine():
-    table = {
-        "centre": (0.0, 0.0),
-        "left": (0.7, 0.0),
-        "right": (-0.7, 0.0),
-        "up": (0.0, 0.6),
+    from agent.loop import assurance
+
+    rng = np.random.default_rng(0)
+    # A still live head: no turns, but its shape wobbles against its eyes and shoulders.
+    still = [
+        _cue(face=tuple(rng.normal(0, 0.08, 2)), body=tuple(rng.normal([0, -0.6, 0.4], 0.04)))
+        for _ in range(20)
+    ]
+    geo = geometric_signal(still, frame_diff=2.0)
+    assert geo["gates"] == {
+        "one_face": True,
+        "smooth": True,
+        "alive": True,
+        "not_frozen": True,
+        "no_device": True,
     }
-    moving = [HeadPose(*table[s], True, True, 0.9) for s in
-              ["centre", "left", "centre", "right", "centre", "up", "centre"]]  # fmt: skip
-    geo = geometric_signal(moving)
-    assert geo["gates"] == {"one_face": True, "smooth": True, "moved": True}
-    assert geo["geo"] == 1.0 and geo["yaw_range"] == 1.4
+    assert geo["moved"] is False and geo["cues"]["stress_frames"] == 0
     assert combine(geo, {"verdict": "PASS", "confidence": 0.9}) == ("PASS", 0.9)
+    assert assurance(geo, "PASS") == "basic"
     # Cosmos naming an artefact always fails the window, whatever YOLO saw.
     assert combine(geo, {"verdict": "FAIL", "confidence": 0.8}) == ("FAIL", 0.2)
-    # A still head: Cosmos may say PASS, but there was nothing to judge.
-    still = geometric_signal([HeadPose(0.0, 0.0, True, True, 0.9)] * 6)
-    assert still["gates"]["moved"] is False
-    assert combine(still, {"verdict": "PASS", "confidence": 1.0}) == ("INCONCLUSIVE", 1.0)
+    # A photo: identical shape every frame -> not alive -> nothing to clear the caller on.
+    photo = geometric_signal([_cue() for _ in range(20)], frame_diff=2.0)
+    assert photo["gates"]["alive"] is False
+    assert combine(photo, {"verdict": "PASS", "confidence": 1.0}) == ("INCONCLUSIVE", 1.0)
+    # A frozen feed or a face inside a phone fails outright, even if Cosmos says PASS.
+    frozen = geometric_signal(still, frame_diff=0.0)
+    assert combine(frozen, {"verdict": "PASS", "confidence": 1.0})[0] == "FAIL"
+    on_phone = geometric_signal(
+        [_cue(face=c.face_shape, body=c.head_body, device_at_face="cell phone") for c in still],
+        frame_diff=2.0,
+    )
+    assert on_phone["gates"]["no_device"] is False
+    assert combine(on_phone, {"verdict": "PASS", "confidence": 1.0})[0] == "FAIL"
+    # A hand at the face is a hard frame: a clean PASS there is strong assurance.
+    hand = [_cue(face=c.face_shape, body=c.head_body) for c in still]
+    hand[5].hand_at_face = True
+    geo_hand = geometric_signal(hand, frame_diff=2.0)
+    assert geo_hand["cues"]["stress_frames"] == 1
+    assert assurance(geo_hand, "PASS") == "strong"
+    # A photo of a turned head is not a turn: the head never moved.
+    turned_photo = geometric_signal([_cue(yaw=0.8) for _ in range(20)], frame_diff=2.0)
+    assert turned_photo["cues"]["stress_frames"] == 0
     # A jump between frames (cut, glitch) halves the score.
-    jumpy = geometric_signal([HeadPose(*table[s], True, True, 0.9) for s in ["left", "right"]])
+    jumpy = geometric_signal([_cue(0.7), _cue(-0.7)] * 3, frame_diff=2.0)
     assert jumpy["gates"]["smooth"] is False
-    assert combine(jumpy, {"verdict": "PASS", "confidence": 0.9}) == ("FAIL", 0.45)
-    # Nobody in frame.
-    nothing = geometric_signal([None] * 6)
-    assert nothing["geo"] == 0.0
-    assert combine(nothing, {"verdict": None}) == ("ERROR", 0.0)
+    assert combine(jumpy, {"verdict": "PASS", "confidence": 0.9})[0] == "FAIL"
+    assert combine(geometric_signal([]), {"verdict": None}) == ("ERROR", 0.0)
+
+
+def test_cues_from_keypoints_and_objects():
+    from perception import Detection
+    from perception.cues import add_objects, frame_cue, frame_diff, micro_motion
+
+    xy, cf = _kp((100, 132), (120, 100), (80, 100))
+    xy[5], xy[6], cf[5], cf[6] = (140, 200), (60, 200), 0.9, 0.9  # shoulders
+    xy[9], cf[9] = (110, 150), 0.9  # a wrist near the nose
+    cue = frame_cue(Detection("person", 0.9, (0, 0, 200, 300), keypoints=xy, kp_conf=cf))
+    assert cue.hand_at_face and cue.face_shape is not None and cue.head_body is not None
+    # Moving the whole picture rigidly (a held photo) leaves the shape measures unchanged.
+    theta = 0.3
+    rot = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+    moved = (xy @ rot.T) * 1.2 + 15
+    cue2 = frame_cue(Detection("person", 0.9, (0, 0, 200, 300), keypoints=moved, kp_conf=cf))
+    assert np.allclose(cue.face_shape, cue2.face_shape)
+    assert np.allclose(cue.head_body, cue2.head_body)
+    assert micro_motion([cue, cue2] * 3)["pose_jitter"] < 1e-6
+    # A face inside a phone's box is a device; a cup beside it is a held object.
+    add_objects(cue, [Detection("cell phone", 0.8, (60, 60, 160, 180))])
+    assert cue.device_at_face == "cell phone"
+    cue3 = frame_cue(Detection("person", 0.9, (0, 0, 200, 300), keypoints=xy, kp_conf=cf))
+    add_objects(cue3, [Detection("cup", 0.7, (150, 120, 190, 170))])
+    assert cue3.object_at_face == "cup" and "cup at face" in cue3.stress
+    still = np.full((10, 10), 128, np.uint8)
+    assert frame_diff([still] * 4) == 0.0
+    assert frame_diff([still, still + 3, still]) == 3.0
 
 
 def test_decide_call():
@@ -242,6 +309,7 @@ def test_run_session_offline(tmp_path, monkeypatch):
     rec = loop.run_session(
         clip,
         detector=FakeDetector(),
+        objects=FakeDetector(),
         reasoner=FakeReasoner(),
         evidence_dir=tmp_path / "ev",
         archive=False,

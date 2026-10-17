@@ -1,15 +1,15 @@
-import { score, VERDICT_COLOR, when, type Summary } from "./api";
+import { firstSentence, score, shape, VERDICT_COLOR, when, type Summary } from "./api";
 import AnimatedList from "./reactbits/AnimatedList";
 
-// Past sessions as a React Bits AnimatedList; selecting one opens its review page.
+// Past calls (or windows) as a React Bits AnimatedList; selecting one opens its review page.
 export function SessionList({ items, maxHeight = 360 }: { items: Summary[]; maxHeight?: number }) {
   if (!items.length) return <p className="m-0 text-sm text-muted">None yet.</p>;
   return (
     <AnimatedList
       items={items.map((s) => ({
         id: s.session_id,
-        title: s.instruction,
-        description: `${when(s.created_at)}${s.label ? ` · label ${s.label}` : ""}`,
+        title: firstSentence(s.reasoning),
+        description: `${when(s.created_at)} · ${shape(s)}${s.label ? ` · test label ${s.label}` : ""}`,
         meta: (
           <span className={`font-mono font-bold ${VERDICT_COLOR[s.verdict]}`}>
             {s.verdict} {score(s.score)}

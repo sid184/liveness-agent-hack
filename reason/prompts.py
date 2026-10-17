@@ -79,6 +79,37 @@ ARTIFACTS: <none | list each problem with its frame numbers>
 VERDICT: <PASS|FAIL>
 CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
 
+# v6 (17 Oct, afternoon): YOLO now marks the hard frames (head turned, a hand or cup at the
+# face) and they are the ones Cosmos sees first; a still head is normal, so the checklist covers
+# what a frontal face gives away too.
+COHERENCE_STRESS = """You are the physical-plausibility judge for a video call. The caller has not \
+been asked to do anything: this is a short window of natural conversation. Your job is to find \
+reasons this could be a deepfake, a face swap, a replayed recording or a photo. Agreeing is not \
+the safe answer; missing a fake costs money.
+
+You see {n} frames sampled over {duration:.0f} seconds, numbered from 1. A detector measured each:
+{observed_sequence}
+Frames marked with a hand, an object or a turned head are the hardest for a face swap: look \
+hardest there.
+
+Name the frame numbers where you see any of these:
+- a hand, cup or object crossing the face that the face texture draws over, or that blurs, \
+melts or shows the face through it
+- face texture sliding, warping or flickering at its edge, at the hairline, the ears or the jaw
+- a turned head whose ears, nose or jawline do not appear or hide like a real 3D head
+- teeth or the inside of the mouth smeared or blurry while the rest is sharp
+- eyes whose reflections or gaze do not match each other or the room
+- light on the face that does not match the light on the neck, hair and room
+- a phone, monitor or laptop edge, glare, moire, or a flat photo instead of a person
+- a cut, jump or loop between consecutive frames
+A head that holds still is normal on a call and is not evidence of a fake; judge the rest.
+
+Answer in exactly this format, nothing else:
+OBSERVED: <what the head, face and hands do, frame by frame>
+ARTIFACTS: <none | list each problem with its frame numbers>
+VERDICT: <PASS|FAIL>
+CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
+
 # Judge prompts by version. PROMPT_VERSION picks the live one; scripts/eval_clips.py runs them all
 # on the labelled clips and logs the comparison to W&B. Add a version, never edit one in place,
 # so earlier eval runs stay comparable. v1-v3 were written for the head-circle challenge.
@@ -88,6 +119,7 @@ COHERENCE_VERSIONS = {
     "v3": COHERENCE + COSMOS_THINK_SUFFIX,
     "v4": COHERENCE_PASSIVE,
     "v5": COHERENCE_PASSIVE + COSMOS_THINK_SUFFIX,
+    "v6": COHERENCE_STRESS,
 }
 
 # Agent (text LLM on W&B Inference). It never decides; the decision is computed.
@@ -95,11 +127,14 @@ VERDICT_WRITER = """You write the decision note for a liveness check on a video 
 finance approver who is not technical. The caller was never asked to do anything: the agent \
 watched the call in short windows. The decision is already made; do not change it.
 
-Decision: {decision} (after {n} windows; a window needs score {threshold} or more)
+Decision: {decision}, assurance {assurance} (after {n} windows; a window needs score {threshold})
+Assurance: strong = the judge saw the caller in at least one hard moment (head turned, a hand or \
+cup at the face) and found it clean; basic = clean and alive but the caller stayed still, so a \
+still face swap is not ruled out.
 Windows, in order:
 {windows}
 Similar past windows from the verdict log: {similar}
 
 Write three sentences at most. Say what decided it (cite the window and frame numbers when the \
-judge gave them), and, if a similar past window is relevant, name how. If the decision is \
-INCONCLUSIVE, say what was missing. No preamble."""
+judge gave them), and the assurance level and what would raise it. If a similar past window is \
+relevant, name how. If the decision is INCONCLUSIVE, say what was missing. No preamble."""

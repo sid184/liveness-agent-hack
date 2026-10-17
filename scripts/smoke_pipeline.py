@@ -19,6 +19,8 @@ from agent.loop import WINDOW_S, decide_call, finish_call, run_session
 from capture.frames import split_clip, synthetic_test_clip
 from config import settings
 from eval import tracing, wandb_log
+from perception import Detector
+from reason import VisionReasoner
 from reason.prompts import COHERENCE_VERSIONS
 
 
@@ -46,10 +48,15 @@ def main() -> None:
     if args.wandb:
         wandb_log.start_run(name=f"smoke-{call_id}", config={"video": str(video)})
 
+    detector, objects = Detector(), Detector(settings.yolo_detect_model)
+    reasoner = VisionReasoner()
     windows, decision = [], "WATCHING"
     for i, part in enumerate(parts, 1):
         rec = run_session(
             part,
+            detector=detector,
+            objects=objects,
+            reasoner=reasoner,
             n_frames=args.frames,
             label=args.label,
             prompt_version=args.prompt,
@@ -62,9 +69,11 @@ def main() -> None:
         geo = rec.signals["geometric"]
         vlm = rec.signals["vlm"]
         print(
-            f"\nwindow {i}: {rec.verdict} {rec.score}  gates {json.dumps(geo['gates'])}  "
-            f"yaw {geo['yaw_range']} pitch {geo['pitch_range']}"
+            f"\nwindow {i}: {rec.verdict} {rec.score} ({rec.signals.get('assurance')})  "
+            f"gates {json.dumps(geo['gates'])}"
         )
+        print(f"  yolo: {rec.signals['stack'][0].get('detail')}")
+        print(f"  cosmos saw: {'; '.join(rec.signals.get('frame_notes') or [])}")
         print(f"  cosmos ({rec.signals['vlm_model']}, {rec.signals['vlm_latency_s']}s): "
               f"{vlm.get('verdict')} {vlm.get('confidence')} | {vlm.get('observed')}")  # fmt: skip
         if vlm.get("artifacts"):
@@ -80,7 +89,9 @@ def main() -> None:
         for w in windows:
             wandb_log.log_session(w)
 
-    print(f"\nDECISION: {decision}\nnote: {rec.reasoning}\n\nstack (last window):")
+    level = (rec.signals.get("call") or {}).get("assurance")
+    print(f"\nDECISION: {decision}{f' ({level})' if level else ''}\nnote: {rec.reasoning}")
+    print("\nstack (last window):")
     for st in rec.signals.get("stack", []):
         lat = "" if st.get("latency_s") is None else f"{st['latency_s']:.1f}s"
         print(f"  {st['step']:<20} {st['component']:<50} {lat:>6}  {st.get('detail') or ''}")

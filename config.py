@@ -10,10 +10,11 @@ from dotenv import dotenv_values, load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 # .env.team is a copy of the organisers' /config/<team>.config (gitignored). Loaded first so
-# .env can reference its values (e.g. VLM_API_KEY=${GPU_BEARER_TOKEN}) and so the team W&B key
-# wins over a stale personal one.
+# .env can reference its values (e.g. VLM_API_KEY=${GPU_BEARER_TOKEN}). .env then overrides both
+# it and the shell: the lab VM exports the organisers' W&B key, and our own W&B project (set in
+# .env) must win over it. Leave a variable out of .env to take the team's value.
 load_dotenv(ROOT / ".env.team")
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)
 # USERNAME is also the login name in most shells, and load_dotenv never overrides the
 # environment, so the team login is read from the file itself when it is there.
 _TEAM_FILE = {k: (v or "").strip() for k, v in dotenv_values(ROOT / ".env.team").items()}
@@ -56,6 +57,7 @@ class Settings:
 
     # Perception
     yolo_model: str
+    yolo_detect_model: str  # COCO detection: phones, screens, cups near the face
 
     # Index
     index_backend: str  # sqlite | local | vast
@@ -108,8 +110,9 @@ def load_settings() -> Settings:
         # On the lab VM the team is WANDB_TEAM; WANDB_ENTITY overrides it for a personal run.
         wandb_entity=_env("WANDB_ENTITY") or _env("WANDB_TEAM"),
         weave_enabled=_flag("WEAVE_ENABLED", True),
-        prompt_version=_env("PROMPT_VERSION", "v4"),
+        prompt_version=_env("PROMPT_VERSION", "v6"),
         yolo_model=_env("YOLO_MODEL", "yolo11n-pose.pt"),
+        yolo_detect_model=_env("YOLO_DETECT_MODEL", "yolo11n.pt"),
         index_backend=_env("INDEX_BACKEND", "sqlite"),
         vast_schema=_env("VAST_SCHEMA", "hackathon"),
         vast_table=_env("VAST_TABLE", "liveness_sessions"),

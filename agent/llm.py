@@ -49,9 +49,12 @@ def enabled() -> bool:
 def _window_line(i: int, r: SessionRecord) -> str:
     s = r.signals
     vlm = s.get("vlm") or {}
-    gates = (s.get("geometric") or {}).get("gates")
+    geo = s.get("geometric") or {}
+    gates, cues = geo.get("gates"), geo.get("cues") or {}
+    hard = cues.get("stress_kinds") or "none"
     return (
-        f"{i}. {s.get('window_verdict') or r.verdict} score {r.score:.2f}; YOLO gates {gates}; "
+        f"{i}. {s.get('window_verdict') or r.verdict} score {r.score:.2f}, assurance "
+        f"{s.get('assurance')}; YOLO gates {gates}; hard moments {hard}; "
         f"Cosmos {vlm.get('verdict')} at {vlm.get('confidence')}: {vlm.get('observed')}; "
         f"artifacts: {vlm.get('artifacts') or 'none'}"
     )
@@ -68,6 +71,7 @@ def write_verdict(
     decision: str,
     similar: list[SessionRecord],
     threshold: float,
+    assurance: str | None = None,
     llm: AgentLLM | None = None,
 ) -> dict[str, Any] | None:
     """The decision note. None when the agent is off; {"error"} when it fails. Callers keep
@@ -76,6 +80,7 @@ def write_verdict(
         return None
     prompt = VERDICT_WRITER.format(
         decision=decision,
+        assurance=assurance or "none",
         n=len(windows),
         threshold=threshold,
         windows="\n".join(_window_line(i, w) for i, w in enumerate(windows, 1)),

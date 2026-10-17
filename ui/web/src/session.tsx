@@ -1,4 +1,5 @@
-// Review page for one session: everything the overlay leaves out.
+// Review page for one window, or for the window that decided a call: everything the overlay
+// leaves out.
 
 import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -98,7 +99,7 @@ function App() {
       </div>
       <main className="relative mx-auto max-w-4xl px-4 py-12">
         <a href="/" className="font-mono text-xs uppercase tracking-widest text-accent">
-          ← Liveness check
+          ← Liveness agent
         </a>
         {s === undefined && <p className="text-muted">Loading…</p>}
         {s === null && <p className="text-muted">Session {id} not found.</p>}
@@ -110,13 +111,15 @@ function App() {
                 <CountUp to={s.score} decimals={2} duration={1.2} />
               </span>
               <p className="m-0 w-full text-muted">
-                {s.instruction}
+                {s.signals?.call
+                  ? `Call decided ${s.verdict}${s.signals.call.assurance ? `, ${s.signals.call.assurance} assurance,` : ""} after ${s.signals.call.windows.length} windows. The caller was never asked to do anything.`
+                  : `One ${s.signals?.call_id ? "window of a call still being watched" : "recorded window"}; verdict ${s.verdict}.`}
                 <br />
                 <span className="font-mono text-xs">
                   {when(s.created_at)} · passive watch
                   {s.signals?.window_no ? ` · window ${s.signals.window_no}` : ""} · prompt{" "}
                   {s.signals?.prompt_version ?? "?"}
-                  {s.label ? ` · label ${s.label}` : ""}
+                  {s.label ? ` · test label ${s.label}` : ""}
                 </span>
               </p>
             </header>
@@ -134,6 +137,7 @@ function App() {
                       className={`rounded border border-line px-2 py-0.5 font-mono text-xs no-underline ${VERDICT_COLOR[w.verdict]}`}
                     >
                       {i + 1}. {w.verdict.toLowerCase()} {w.score.toFixed(2)}
+                      {w.assurance ? ` · ${w.assurance}` : ""}
                     </a>
                   ))}
                 </div>
@@ -155,8 +159,24 @@ function App() {
                 Artefacts: {s.signals?.vlm?.artifacts ?? "none named"}
               </p>
               <Gates gates={s.signals?.geometric?.gates} />
+              {s.signals?.geometric?.cues && (
+                <p className="mt-2 mb-0 text-xs text-muted">
+                  YOLO: natural movement {s.signals.geometric.cues.pose_jitter?.toFixed(2)} face /{" "}
+                  {s.signals.geometric.cues.head_body?.toFixed(2)} head vs shoulders; hard moments:{" "}
+                  {s.signals.geometric.cues.stress_frames
+                    ? `${s.signals.geometric.cues.stress_frames} frames (${(s.signals.geometric.cues.stress_kinds ?? []).join(", ")})`
+                    : "none, the caller stayed still (basic assurance at most)"}
+                  .
+                </p>
+              )}
               {s.frames.length > 0 && (
-                <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1.5">
+                <p className="mt-4 mb-1.5 text-xs text-muted">
+                  The {s.frames.length} frames Cosmos saw, picked by YOLO: hard moments first (a
+                  hand or cup at the face, the furthest turns), then spread. Red = cited as evidence.
+                </p>
+              )}
+              {s.frames.length > 0 && (
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-1.5">
                   {s.frames.map((u, i) => {
                     const hit = s.cited.includes(i + 1);
                     return (
@@ -171,13 +191,18 @@ function App() {
                           {i + 1}
                           {hit ? " cited" : ""}
                         </figcaption>
+                        {s.signals?.frame_notes?.[i] && (
+                          <figcaption className="absolute bottom-1 left-1 rounded bg-black/70 px-1 font-mono text-[10px]">
+                            {s.signals.frame_notes[i]}
+                          </figcaption>
+                        )}
                       </figure>
                     );
                   })}
                 </div>
               )}
             </Card>
-            <Card title="Similar past sessions">
+            <Card title="Similar past windows · Cosmos Embed1 over the verdict log">
               <SessionList items={s.similar} maxHeight={260} />
             </Card>
             <Card title="Raw model output">
@@ -193,7 +218,7 @@ function App() {
             </Card>
           </>
         )}
-        <Card title="Recent sessions">
+        <Card title="Recent calls">
           <SessionList items={history} />
         </Card>
       </main>

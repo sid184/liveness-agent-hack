@@ -122,7 +122,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clips", default=str(settings.data_dir / "clips"))
     # v1 is the naive baseline; v2/v3 were written for the head-circle challenge.
-    ap.add_argument("--versions", default="v1,v4,v5")
+    ap.add_argument("--versions", default="v1,v4,v6")
     ap.add_argument("--frames", type=int, default=12)
     ap.add_argument("--from-vss", action="store_true", help="pull the team's VSS uploads first")
     ap.add_argument(
@@ -153,9 +153,10 @@ def main() -> None:
 
     tracing.init()
     detector, reasoner = Detector(), VisionReasoner()
+    objects = Detector(settings.yolo_detect_model)
 
     # YOLO once per clip: the geometry does not depend on the prompt.
-    seen = {clip: observe(str(clip), detector) for clip in clips}
+    seen = {clip: observe(str(clip), detector, objects) for clip in clips}
 
     group = f"eval-{time.strftime('%m%d-%H%M')}"
     summary: dict[str, dict[str, Any]] = {}
@@ -195,6 +196,9 @@ def main() -> None:
                     "label": label,
                     "yaw_range": s["geo"]["yaw_range"],
                     "pitch_range": s["geo"]["pitch_range"],
+                    "pose_jitter": s["geo"]["cues"]["pose_jitter"],
+                    "head_body": s["geo"]["cues"]["head_body"],
+                    "hard_frames": s["geo"]["cues"]["stress_frames"],
                     "geo": s["geo"]["geo"],
                     **{f"gate_{k}": v for k, v in s["geo"]["gates"].items()},
                     "cosmos_verdict": vlm.get("verdict"),
@@ -246,6 +250,7 @@ def main() -> None:
                 label=label_of(clip.name),
                 detector=detector,
                 reasoner=reasoner,
+                objects=objects,
                 prompt_version=args.index,
                 archive=args.archive,
                 evidence_dir=settings.data_dir / "sessions" / f"eval_{clip.stem}",

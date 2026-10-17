@@ -12,7 +12,7 @@ export type OverlayState =
   | { kind: "watching"; reason?: string | null; windowNo: number; maxWindows: number;
       windowMs: number; windowStartedAt: number; startedAt: number; note?: string }
   | { kind: "judging"; startedAt: number }
-  | { kind: "pass"; score: number }
+  | { kind: "pass"; score: number; assurance?: string | null }
   | { kind: "alert"; verdict: Verdict; score?: number; text: string; frames: string[];
       sessionId?: string };
 
@@ -157,7 +157,7 @@ function Body({ state, ready, onAction }: Omit<Props, "inline" | "win">) {
     return (
       <div className={`${frame} w-[280px]`}>
         <ShinyText
-          text="Checking…"
+          text="Deciding…"
           speed={1.4}
           color="#6b7280"
           shineColor="#5eead4"
@@ -175,7 +175,16 @@ function Body({ state, ready, onAction }: Omit<Props, "inline" | "win">) {
     return (
       <div className={`${frame} flex-row items-center gap-3 px-5`}>
         <span className="text-2xl font-extrabold text-ok animate-pop">✓ LIVE</span>
-        <span className="text-lg text-ok/80 animate-pop">{score(state.score)}</span>
+        <span className="flex flex-col leading-tight animate-pop">
+          <span className="text-lg text-ok/80">{score(state.score)}</span>
+          {state.assurance && (
+            <span
+              className={`text-[11px] uppercase tracking-widest ${state.assurance === "strong" ? "text-ok" : "text-warn"}`}
+            >
+              {state.assurance}
+            </span>
+          )}
+        </span>
       </div>
     );
   }

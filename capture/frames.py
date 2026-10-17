@@ -163,29 +163,42 @@ def synthetic_test_clip(save_to: str | Path, seconds: float = 4.0, fps: int = 15
 
 
 def split_clip(path: str | Path, seconds: float, out_dir: str | Path) -> list[Path]:
-    """Cut a recording into back-to-back windows of `seconds` (re-encoded so every window
-    starts on a keyframe). Used to replay a recorded call as the windows a live call would send."""
+    """Cut a recording into back-to-back windows of `seconds`, one exact cut each (re-encoded).
+    Used to replay a recorded call as the windows a live call would send. A last piece under a
+    second is dropped: too few frames to judge."""
+    import math
     import subprocess
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("window_*.mp4"):
         old.unlink()
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-an", "-c:v", "libx264",
-        "-preset", "veryfast", "-force_key_frames", f"expr:gte(t,n_forced*{seconds})",
-        "-f", "segment", "-segment_time", str(seconds), "-reset_timestamps", "1",
-        str(out / "window_%02d.mp4"),
-    ]  # fmt: skip
-    subprocess.run(cmd, check=True, capture_output=True)
-    windows = sorted(out.glob("window_*.mp4"))
-    # A last sliver under a second has too few frames to judge.
-    if len(windows) > 1:
-        cap = open_source(str(windows[-1]))
-        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        cap.release()
-        if n / fps < 1.0:
-            windows[-1].unlink()
-            windows = windows[:-1]
+    total = _duration(Path(path))
+    windows = []
+    for i in range(max(1, math.ceil(total / seconds))):
+        start = i * seconds
+        if i and total - start < 1.0:
+            break
+        dst = out / f"window_{i:02d}.mp4"
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.3f}", "-i", str(path),
+            "-t", f"{seconds:.3f}", "-an", "-c:v", "libx264", "-preset", "veryfast",
+            "-pix_fmt", "yuv420p", str(dst),
+        ]  # fmt: skip
+        subprocess.run(cmd, check=True, capture_output=True)
+        windows.append(dst)
     return windows
+
+
+def _duration(path: Path) -> float:
+    import subprocess
+
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0

@@ -55,6 +55,7 @@ def _pipeline() -> dict[str, Any]:
         from reason import VisionReasoner
 
         _models["detector"] = Detector()
+        _models["objects"] = Detector(settings.yolo_detect_model)
         _models["reasoner"] = VisionReasoner()
         tracing.init()
         # One W&B run for the whole server process; every verdict is a row in it.
@@ -87,6 +88,9 @@ def _public(record: SessionRecord, with_signals: bool = False) -> dict[str, Any]
     d["frames"] = [u for u in urls if u.endswith(".jpg")]
     d["clip"] = next((u for u in urls if u.endswith(".mp4")), None)
     d["cited"] = (record.signals.get("vlm") or {}).get("cited_frames") or []
+    d["assurance"] = (record.signals.get("call") or {}).get("assurance") or record.signals.get(
+        "assurance"
+    )
     d["stack"] = record.signals.get("stack") or []
     if with_signals:
         d["signals"].pop("embedding", None)  # 256 floats nobody reads
@@ -96,10 +100,17 @@ def _public(record: SessionRecord, with_signals: bool = False) -> dict[str, Any]
 
 
 def _summary(record: SessionRecord) -> dict[str, Any]:
+    call = record.signals.get("call") or {}
     return {
         k: getattr(record, k)
         for k in ("session_id", "challenge_id", "verdict", "score", "instruction", "reasoning")
-    } | {"created_at": record.created_at, "label": record.label}
+    } | {
+        "created_at": record.created_at,
+        "label": record.label,
+        "windows": len(call.get("windows") or []) or None,  # set on a call's deciding window
+        "assurance": call.get("assurance") or record.signals.get("assurance"),
+        "window_no": record.signals.get("window_no"),
+    }
 
 
 @app.get("/")
@@ -153,6 +164,7 @@ async def watch_window(
                 label=label if label in ("live", "attack") else None,
                 detector=models["detector"],
                 reasoner=models["reasoner"],
+                objects=models["objects"],
                 evidence_dir=folder,
                 call_id=call_id,
                 window_no=len(windows) + 1,
