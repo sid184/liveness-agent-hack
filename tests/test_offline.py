@@ -32,6 +32,9 @@ def test_issue_shuffles_order():
     assert a.order != b.order
     assert "then" in a.instruction and "{" not in a.instruction
     assert a.deadline > a.issued_at
+    pinned = issue("head_circle", params={"order": ("up", "down", "left", "right")})
+    assert pinned.order == ["up", "down", "left", "right"]
+    assert "up, then down, then left, then right" in pinned.instruction
 
 
 def test_parse_verdict():

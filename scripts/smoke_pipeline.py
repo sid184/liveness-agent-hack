@@ -1,7 +1,7 @@
 """One clip through the whole pipeline: challenge -> YOLO -> VLM -> verdict -> index.
 
 uv run python -m scripts.smoke_pipeline                         # synthetic clip
-uv run python -m scripts.smoke_pipeline --video data/clips/live_01.mp4 --label live
+uv run python -m scripts.smoke_pipeline --video data/clips/live_01.mp4 --label live --order up,down,left,right
 """
 
 from __future__ import annotations
@@ -21,6 +21,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--video")
     ap.add_argument("--frames", type=int, default=12)
+    ap.add_argument(
+        "--order", help="directions the person actually performed, e.g. up,down,left,right"
+    )
     ap.add_argument("--label", choices=["live", "attack"])
     ap.add_argument("--wandb", action="store_true", help="log this run to W&B")
     args = ap.parse_args()
@@ -30,7 +33,8 @@ def main() -> None:
         video = synthetic_test_clip(settings.data_dir / "samples" / "synthetic_pass.mp4")
         print(f"no clip given; synthetic clip at {video}")
 
-    ch = issue()
+    params = {"order": tuple(args.order.split(","))} if args.order else None
+    ch = issue("head_circle", params=params)
     print(f"challenge: [{ch.id}] {ch.instruction}")
     if args.wandb:
         wandb_log.start_run(

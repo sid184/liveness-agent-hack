@@ -62,8 +62,16 @@ class IssuedChallenge:
         return self.issued_at + self.challenge.duration_s
 
 
-def issue(challenge_id: str | None = None, rng: random.Random | None = None) -> IssuedChallenge:
-    """Pick a challenge (random unless named), resolve its parameters and stamp it."""
+def issue(
+    challenge_id: str | None = None,
+    rng: random.Random | None = None,
+    params: dict | None = None,
+) -> IssuedChallenge:
+    """Pick a challenge (random unless named), resolve its parameters and stamp it.
+
+    `params` pins parameters, e.g. `{"order": ("up", "down", "left", "right")}` when judging a
+    recorded clip in which the person performed a known order.
+    """
     rng = rng or random.Random()
     if challenge_id is None:
         ch = rng.choice(CHALLENGES)
@@ -71,7 +79,11 @@ def issue(challenge_id: str | None = None, rng: random.Random | None = None) -> 
         ch = next((c for c in CHALLENGES if c.id == challenge_id), None)
         if ch is None:
             raise KeyError(f"unknown challenge {challenge_id!r}")
-    params = {k: rng.choice(v) for k, v in ch.params.items()}
+    params = {k: rng.choice(v) for k, v in ch.params.items()} | dict(params or {})
+    if "order" in params:
+        params["order"] = tuple(params["order"])
+        if sorted(params["order"]) != sorted(DIRECTIONS):
+            raise ValueError(f"order must be a permutation of {DIRECTIONS}, got {params['order']}")
     fmt = dict(params)
     if "order" in params:
         fmt["order_text"] = order_text(params["order"])
