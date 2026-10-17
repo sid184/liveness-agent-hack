@@ -2,12 +2,20 @@
 
 import numpy as np
 
-from agent.loop import combine, decide_call, geometric_signal, parse_verdict
+from agent.loop import (
+    MAX_WINDOWS,
+    combine,
+    decide_call,
+    geometric_signal,
+    head_crop,
+    parse_verdict,
+)
 from capture.frames import montage, synthetic_test_image, to_jpeg_bytes
 from index.base import SessionRecord
 from index.local import LocalIndex
 from index.sqlite import SqliteIndex
 from perception import HeadPose, head_pose
+from perception.detector import Detection
 
 
 def test_synthetic_image_and_jpeg():
@@ -64,7 +72,9 @@ def test_head_pose_directions():
     assert up.facing == "up"
     down = head_pose(*_kp((100, 160), (120, 100), (80, 100)))
     assert down.facing == "down"
-    assert head_pose(*_kp((100, 132), None, (80, 100))) is None
+    prof = head_pose(*_kp((100, 132), None, (80, 100)))  # only the right eye visible
+    assert prof is not None and prof.profile and prof.yaw == 1.0
+    assert head_pose(*_kp((100, 132), None, None)) is None
 
 
 def _cue(yaw=0.0, pitch=0.0, face=(0.0, 0.0), body=(0.0, -0.6, 0.4), **kw):
@@ -159,11 +169,26 @@ def test_cues_from_keypoints_and_objects():
     assert frame_diff([still, still + 3, still]) == 3.0
 
 
+def test_head_crop_from_keypoints():
+    xy, cf = _kp((100, 132), (120, 100), (80, 100))
+    d = Detection("person", 0.9, (60, 80, 140, 300), keypoints=xy, kp_conf=cf)
+    box = head_crop([[d], [d], []], (480, 640, 3))
+    assert box is not None
+    x1, y1, x2, y2 = box
+    assert x1 < 80 and x2 > 120 and y1 < 100 and y2 > 132  # contains the face points with margin
+    assert 0 <= x1 and 0 <= y1 and x2 <= 640 and y2 <= 480
+    assert head_crop([[], []], (480, 640, 3)) is None
+
+
 def test_decide_call():
     assert decide_call(["PASS"]) == "WATCHING"
     assert decide_call(["INCONCLUSIVE", "PASS", "PASS"]) == "PASS"
     assert decide_call(["PASS", "FAIL"]) == "FAIL"
-    assert decide_call(["INCONCLUSIVE"] * 6) == "INCONCLUSIVE"
+    # Passive: nobody was asked to move, so still windows keep the call watching, never fail it.
+    assert decide_call(["INCONCLUSIVE"] * 3) == "WATCHING"
+    assert decide_call(["INCONCLUSIVE", "PASS", "INCONCLUSIVE", "INCONCLUSIVE"]) == "WATCHING"
+    mixed = ["PASS", "INCONCLUSIVE", "ERROR", "INCONCLUSIVE"] + ["ERROR", "INCONCLUSIVE"] * 2
+    assert len(mixed) == MAX_WINDOWS and decide_call(mixed) == "INCONCLUSIVE"
     assert decide_call(["ERROR", "PASS"]) == "WATCHING"
 
 

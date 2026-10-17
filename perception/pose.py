@@ -17,9 +17,16 @@ import numpy as np
 
 NOSE, L_EYE, R_EYE, L_EAR, R_EAR = 0, 1, 2, 3, 4
 
-# Thresholds on the ratios below. Tuned on the first real clips; keep them here, not inline.
+# Absolute thresholds, used only by HeadPose.facing (single frame, no baseline).
 YAW_TURNED = 0.55  # |yaw| above this counts as facing left or right
 PITCH_TILTED = 0.45  # |pitch| above this counts as facing up or down
+
+# Baseline-relative thresholds, used by classify() over a whole clip. Tuned on live_01 (17 Oct):
+# a clear 45-degree turn reads about 0.45 from baseline; full profile saturates at 1.0; looking up
+# reads about +0.28 from baseline; a lazy "down" reads about -0.18.
+TURN_DEV = 0.35
+UP_DEV = 0.2
+DOWN_DEV = -0.15
 
 
 @dataclass(frozen=True)
@@ -28,7 +35,8 @@ class HeadPose:
     pitch: float
     left_ear_visible: bool
     right_ear_visible: bool
-    confidence: float  # min keypoint confidence over nose and eyes
+    confidence: float  # min keypoint confidence over nose and visible eyes
+    profile: bool = False  # only one eye visible: yaw is saturated to +-1, pitch is unknown (0)
 
     @property
     def facing(self) -> str:
@@ -43,11 +51,27 @@ class HeadPose:
 def head_pose(xy: np.ndarray, conf: np.ndarray, min_conf: float = 0.3) -> HeadPose | None:
     """Pose from one person's keypoints: xy is (17, 2) pixels, conf is (17,).
 
-    Returns None when the nose or both eyes are missing, which means we cannot measure anything
-    (face out of frame, or a full profile where one eye is hidden and the proxy breaks down).
+    Returns None when the nose or both eyes are missing (face out of frame or facing away).
+    With exactly one eye visible the head is in full profile: the yaw is saturated to +-1 by
+    which eye we can see, and the pitch is unknown. Measured 17 Oct: without this, every full
+    turn in a real clip read as "no measurement", exactly where the signal matters most.
     """
-    if conf[NOSE] < min_conf or conf[L_EYE] < min_conf or conf[R_EYE] < min_conf:
+    if conf[NOSE] < min_conf:
         return None
+    l_ok, r_ok = conf[L_EYE] >= min_conf, conf[R_EYE] >= min_conf
+    if not (l_ok or r_ok):
+        return None
+    if l_ok != r_ok:
+        # Only the person's left eye visible: the camera sees their left side, so the head is
+        # turned to their right (yaw negative). And the reverse.
+        return HeadPose(
+            yaw=-1.0 if l_ok else 1.0,
+            pitch=0.0,
+            left_ear_visible=bool(conf[L_EAR] >= min_conf),
+            right_ear_visible=bool(conf[R_EAR] >= min_conf),
+            confidence=float(min(conf[NOSE], conf[L_EYE] if l_ok else conf[R_EYE])),
+            profile=True,
+        )
     nose, le, re = xy[NOSE], xy[L_EYE], xy[R_EYE]
     eye_mid = (le + re) / 2
     eye_dist = float(np.linalg.norm(le - re))
@@ -70,19 +94,75 @@ def head_pose(xy: np.ndarray, conf: np.ndarray, min_conf: float = 0.3) -> HeadPo
     )
 
 
+def classify(poses: list[HeadPose | None]) -> list[str]:
+    """Per-frame direction label relative to the clip's own resting pose.
+
+    The baseline is the median yaw and pitch over frontal frames, which removes the camera
+    angle (a laptop camera below the face makes a level head read as slightly 'up'). Profile
+    frames are left or right outright. Unmeasurable frames are '?'.
+    """
+    frontal = [p for p in poses if p is not None and not p.profile]
+    if frontal:
+        base_yaw = float(np.median([p.yaw for p in frontal]))
+        base_pitch = float(np.median([p.pitch for p in frontal]))
+    else:
+        base_yaw = base_pitch = 0.0
+    out = []
+    for p in poses:
+        if p is None:
+            out.append("?")
+        elif p.profile:
+            out.append("left" if p.yaw > 0 else "right")
+        else:
+            dy, dp = p.yaw - base_yaw, p.pitch - base_pitch
+            if abs(dy) >= TURN_DEV and abs(dy) >= abs(dp):
+                out.append("left" if dy > 0 else "right")
+            elif dp >= UP_DEV:
+                out.append("up")
+            elif dp <= DOWN_DEV:
+                out.append("down")
+            else:
+                out.append("centre")
+    return out
+
+
+def directions_reached(poses: list[HeadPose | None]) -> dict[str, int | None]:
+    """First frame index at which each direction was seen, or None."""
+    first: dict[str, int | None] = {"up": None, "down": None, "left": None, "right": None}
+    for i, f in enumerate(classify(poses)):
+        if f in first and first[f] is None:
+            first[f] = i
+    return first
+
+
+def in_order(first: dict[str, int | None], order: list[str]) -> bool:
+    """True when every direction in `order` was reached, and in that sequence."""
+    idx = [first.get(d) for d in order]
+    if any(i is None for i in idx):
+        return False
+    return all(a < b for a, b in zip(idx, idx[1:], strict=False))
+
+
 def motion_range(poses: list[HeadPose | None]) -> tuple[float, float]:
-    """(yaw range, pitch range) over the measurable frames: how much the head actually turned."""
-    pts = [(p.yaw, p.pitch) for p in poses if p is not None]
-    if len(pts) < 2:
-        return 0.0, 0.0
-    arr = np.array(pts)
-    span = arr.max(axis=0) - arr.min(axis=0)
-    return float(span[0]), float(span[1])
+    """(yaw range, pitch range): how much the head actually turned.
+
+    Yaw uses every measurable frame, so a full profile (saturated +-1) counts as the big turn it
+    is. Pitch uses frontal frames only, because a profile frame's pitch is unknown.
+    """
+    yaws = [p.yaw for p in poses if p is not None]
+    pitches = [p.pitch for p in poses if p is not None and not p.profile]
+    yr = max(yaws) - min(yaws) if len(yaws) >= 2 else 0.0
+    pr = max(pitches) - min(pitches) if len(pitches) >= 2 else 0.0
+    return float(yr), float(pr)
 
 
 def max_jump(poses: list[HeadPose | None]) -> float:
-    """Largest frame-to-frame change in (yaw, pitch). Replays and swap glitches jump."""
-    pts = [(p.yaw, p.pitch) for p in poses if p is not None]
+    """Largest change in (yaw, pitch) between consecutive frontal frames.
+
+    Replays and swap glitches jump. Profile frames are skipped: their yaw is saturated and their
+    pitch unknown, so a real turn into profile would look like a cut.
+    """
+    pts = [(p.yaw, p.pitch) for p in poses if p is not None and not p.profile]
     if len(pts) < 2:
         return 0.0
     arr = np.array(pts)

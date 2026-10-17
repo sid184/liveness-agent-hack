@@ -39,34 +39,52 @@ class Detection:
 class Detector:
     """Thin wrapper so the rest of the code never imports ultralytics directly."""
 
-    def __init__(self, model_path: str | None = None):
+    MAX_EDGE = 960  # frames larger than this are shrunk before inference; YOLO runs at 640 anyway
+
+    def __init__(self, model_path: str | None = None, device: str | None = None):
+        import torch
         from ultralytics import YOLO  # slow import, keep it local
 
         self.model = YOLO(model_path or settings.yolo_model)
         self.names: dict[int, str] = self.model.names
+        # Apple GPU is about 5x faster than CPU for this model (measured 17 Oct).
+        self.device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+
+    @classmethod
+    def _shrink(cls, image: np.ndarray) -> tuple[np.ndarray, float]:
+        """Downscale so the longest edge is MAX_EDGE; return the image and the scale applied."""
+        h, w = image.shape[:2]
+        scale = cls.MAX_EDGE / max(h, w)
+        if scale >= 1:
+            return image, 1.0
+        small = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        return small, scale
 
     def detect(self, image: np.ndarray, conf: float = 0.25) -> list[Detection]:
-        res = self.model.predict(image, conf=conf, verbose=False)[0]
-        return self._to_detections(res)
+        small, scale = self._shrink(image)
+        res = self.model.predict(small, conf=conf, device=self.device, verbose=False)[0]
+        return self._to_detections(res, 1 / scale)
 
     def track(self, image: np.ndarray, conf: float = 0.25) -> list[Detection]:
         """Like detect, but assigns persistent track ids across successive calls."""
-        res = self.model.track(image, conf=conf, persist=True, verbose=False)[0]
-        return self._to_detections(res)
+        small, scale = self._shrink(image)
+        res = self.model.track(small, conf=conf, device=self.device, persist=True, verbose=False)[0]
+        return self._to_detections(res, 1 / scale)
 
-    def _to_detections(self, res) -> list[Detection]:
+    def _to_detections(self, res, up: float = 1.0) -> list[Detection]:
+        """Boxes and keypoints come back in the original image's pixel coordinates (x `up`)."""
         boxes = res.boxes
         if boxes is None or len(boxes) == 0:
             return []
         ids = boxes.id.int().tolist() if boxes.id is not None else [None] * len(boxes)
         kps = res.keypoints
-        kp_xy = kps.xy.cpu().numpy() if kps is not None and kps.xy is not None else None
+        kp_xy = kps.xy.cpu().numpy() * up if kps is not None and kps.xy is not None else None
         kp_cf = kps.conf.cpu().numpy() if kps is not None and kps.conf is not None else None
         out = []
         for i, (xyxy, c, k, tid) in enumerate(
             zip(boxes.xyxy.tolist(), boxes.conf.tolist(), boxes.cls.tolist(), ids, strict=True)
         ):
-            x1, y1, x2, y2 = (int(v) for v in xyxy)
+            x1, y1, x2, y2 = (int(v * up) for v in xyxy)
             out.append(
                 Detection(
                     self.names[int(k)],

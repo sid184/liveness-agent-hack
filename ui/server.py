@@ -64,10 +64,14 @@ def _pipeline() -> dict[str, Any]:
 
 
 def _transcode(src: Path, dst: Path) -> None:
-    """Browser webm has no frame count and a variable rate; give OpenCV a constant-rate mp4."""
+    """Browser webm has no frame count and a variable rate; give OpenCV a constant-rate mp4.
+
+    Also shrinks to 640 px wide: Mac cameras record 3024 px frames, and YOLO at that size spent
+    about 1.5 s per frame in preprocessing (measured 17 Oct). The model runs at 640 anyway.
+    """
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an", "-r", "15",
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast",
+        "-vf", "scale=640:-2", "-c:v", "libx264", "-preset", "veryfast",
         "-pix_fmt", "yuv420p", str(dst),
     ]  # fmt: skip
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -142,11 +146,14 @@ async def watch_window(
     if call_id not in _calls:
         raise HTTPException(404, "unknown call; POST /api/watch/start first")
     data = await clip.read()
-    async with _locks[call_id]:
-        windows = _calls[call_id]
-        if decide_call([w.signals.get("window_verdict") or w.verdict for w in windows]) not in (
-            "WATCHING",
-        ):
+    lock = _locks.get(call_id)
+    if lock is None:  # decided and cleaned up while this window was uploading
+        raise HTTPException(409, "this call is already decided")
+    async with lock:
+        windows = _calls.get(call_id)
+        if windows is None or decide_call(
+            [w.signals.get("window_verdict") or w.verdict for w in windows]
+        ) not in ("WATCHING",):
             raise HTTPException(409, "this call is already decided")
         folder = SESSIONS / uuid.uuid4().hex[:12]
         folder.mkdir(parents=True)

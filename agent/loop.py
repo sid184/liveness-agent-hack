@@ -41,9 +41,12 @@ INSTRUCTION = "None. The caller was not asked to do anything; this is natural co
 THRESHOLD = 0.5
 JUMP_PENALTY = 0.5  # a cut or glitch between frames halves the Cosmos score
 MAX_JUMP = 0.8  # (yaw, pitch) jump between geometry frames above this is a cut, replay or glitch
-MIN_FACE_FRACTION = 0.9  # frames in which exactly one face must be measurable
-# A visible head turn (informational: stress frames, not this, decide the assurance level).
-MIN_YAW_RANGE = 0.5
+MIN_FACE_FRACTION = (
+    0.6  # frames with exactly one measurable face; a real turn loses a few at profile
+)
+# A visible head turn: a natural glance of about 30 degrees (Sid, measured 17 Oct on live windows).
+# Informational; the hard frames, not this, decide the assurance level.
+MIN_YAW_RANGE = 0.35
 MIN_PITCH_RANGE = 0.4
 N_GEO_FRAMES = 40  # YOLO is cheap: about 4 fps over a 10 s clip, enough to see jumps
 OBJECT_EVERY = 4  # the detection pass (devices, cups) runs on every 4th pose frame
@@ -51,7 +54,7 @@ OBJECT_EVERY = 4  # the detection pass (devices, cups) runs on every 4th pose fr
 # Call decision.
 WINDOW_S = 8  # seconds per recorded window
 PASSES_NEEDED = 2  # clean windows before the caller is cleared
-MAX_WINDOWS = 6  # then stop watching: INCONCLUSIVE
+MAX_WINDOWS = 8  # then stop watching: INCONCLUSIVE
 
 
 def parse_verdict(text: str) -> dict[str, Any]:
@@ -212,13 +215,48 @@ def _stage(step: str, component: str, t0: float, **detail: Any) -> dict[str, Any
     } | {k: v for k, v in detail.items() if v is not None}
 
 
+def head_crop(
+    per_frame: list[list[Detection]], shape: tuple[int, ...], margin: float = 1.2
+) -> list[int] | None:
+    """One box around the head across the whole window, from the face keypoints of the most
+    confident person in each frame, grown by `margin` of its size and clamped to the image.
+
+    A call recording is usually a whole meeting window; the face is a small patch of it. Cosmos
+    judges a 640 px face far better than a 640 px window with a face in it (17 Oct).
+    """
+    pts = []
+    for dets in per_frame:
+        people = [d for d in dets if d.keypoints is not None and d.kp_conf is not None]
+        if not people:
+            continue
+        d = max(people, key=lambda d: d.conf)
+        ok = d.kp_conf[:5] >= 0.3
+        if ok.any():
+            pts.append(d.keypoints[:5][ok])
+    if not pts:
+        return None
+    allp = np.concatenate(pts)
+    x1, y1 = allp.min(axis=0)
+    x2, y2 = allp.max(axis=0)
+    w, h = max(x2 - x1, 1.0), max(y2 - y1, 1.0)
+    side = max(w, h) * (1 + 2 * margin)  # square-ish, hair to collar
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2 + h * 0.4  # the face sits below the eye line
+    H, W = shape[:2]
+    bx1, by1 = int(max(0, cx - side / 2)), int(max(0, cy - side / 2))
+    bx2, by2 = int(min(W, cx + side / 2)), int(min(H, cy + side / 2))
+    if bx2 - bx1 < 32 or by2 - by1 < 32:
+        return None
+    return [bx1, by1, bx2, by2]
+
+
 @op("yolo.pose_gates", drop=("detector", "objects"))
 def observe(video_path: str, detector: Detector, objects: Detector | None = None) -> dict[str, Any]:
     """Two YOLO passes over a dense sample: pose on every frame (head, shoulders, wrists), object
     detection on every OBJECT_EVERY-th (phones, screens, cups). Gates, cues and per-frame
     stress flags come out; Cosmos is told which frames are the hard ones."""
     geo_frames = sample_frames(video_path, N_GEO_FRAMES)
-    cues = cues_from_detections([detector.detect(f.image) for f in geo_frames])
+    per_frame = [detector.detect(f.image) for f in geo_frames]
+    cues = cues_from_detections(per_frame)
     if objects is not None:
         for i in range(0, len(geo_frames), OBJECT_EVERY):
             add_objects(cues[i], objects.detect(geo_frames[i].image))
@@ -228,6 +266,7 @@ def observe(video_path: str, detector: Detector, objects: Detector | None = None
     grey = [cv2.cvtColor(cv2.resize(f.image, (320, 180)), cv2.COLOR_BGR2GRAY) for f in consecutive]
     geo = geometric_signal(cues, frame_diff(grey))
     geo["frame_indices"] = [f.index for f in geo_frames]
+    geo["crop"] = head_crop(per_frame, geo_frames[0].image.shape) if geo_frames else None
     geo["pose_track"] = [None if c.pose is None else [c.pose.yaw, c.pose.pitch] for c in cues]
     return {"geo": geo, "poses": [c.pose for c in cues]}
 
@@ -282,6 +321,11 @@ def judge(
         n_frames = min(n_frames, reasoner.max_images)  # keep the prompt's frame numbers true
     picked = pick_frames(geo, n_frames)
     frames = read_frames(video_path, picked) if picked else sample_frames(video_path, n_frames)
+    crop = geo.get("crop")
+    if crop:
+        x1, y1, x2, y2 = crop
+        for f in frames:
+            f.image = f.image[y1:y2, x1:x2]
     geo_idx = geo.get("frame_indices") or []
     stress = geo.get("stress_track") or []
     facing_at, notes = [], []

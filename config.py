@@ -110,7 +110,7 @@ def load_settings() -> Settings:
         # On the lab VM the team is WANDB_TEAM; WANDB_ENTITY overrides it for a personal run.
         wandb_entity=_env("WANDB_ENTITY") or _env("WANDB_TEAM"),
         weave_enabled=_flag("WEAVE_ENABLED", True),
-        prompt_version=_env("PROMPT_VERSION", "v6"),
+        prompt_version=_env("PROMPT_VERSION", "v7"),
         yolo_model=_env("YOLO_MODEL", "yolo11n-pose.pt"),
         yolo_detect_model=_env("YOLO_DETECT_MODEL", "yolo11n.pt"),
         index_backend=_env("INDEX_BACKEND", "sqlite"),

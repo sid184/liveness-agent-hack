@@ -79,9 +79,9 @@ ARTIFACTS: <none | list each problem with its frame numbers>
 VERDICT: <PASS|FAIL>
 CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
 
-# v6 (17 Oct, afternoon): YOLO now marks the hard frames (head turned, a hand or cup at the
+# v7 (17 Oct, afternoon): YOLO now marks the hard frames (head turned, a hand or cup at the
 # face) and they are the ones Cosmos sees first; a still head is normal, so the checklist covers
-# what a frontal face gives away too.
+# what a frontal face gives away too, plus Sid's tells of generated video from v6.
 COHERENCE_STRESS = """You are the physical-plausibility judge for a video call. The caller has not \
 been asked to do anything: this is a short window of natural conversation. Your job is to find \
 reasons this could be a deepfake, a face swap, a replayed recording or a photo. Agreeing is not \
@@ -102,6 +102,8 @@ melts or shows the face through it
 - light on the face that does not match the light on the neck, hair and room
 - a phone, monitor or laptop edge, glare, moire, or a flat photo instead of a person
 - a cut, jump or loop between consecutive frames
+- signs of generated video: background and framing perfectly locked with no camera shake or \
+sensor noise; skin or hair waxy or unnaturally smooth; eyes that never blink across the frames
 A head that holds still is normal on a call and is not evidence of a fake; judge the rest.
 
 Answer in exactly this format, nothing else:
@@ -119,7 +121,7 @@ COHERENCE_VERSIONS = {
     "v3": COHERENCE + COSMOS_THINK_SUFFIX,
     "v4": COHERENCE_PASSIVE,
     "v5": COHERENCE_PASSIVE + COSMOS_THINK_SUFFIX,
-    "v6": COHERENCE_STRESS,
+    "v7": COHERENCE_STRESS,
 }
 
 # Agent (text LLM on W&B Inference). It never decides; the decision is computed.
@@ -138,3 +140,36 @@ Similar past windows from the verdict log: {similar}
 Write three sentences at most. Say what decided it (cite the window and frame numbers when the \
 judge gave them), and the assurance level and what would raise it. If a similar past window is \
 relevant, name how. If the decision is INCONCLUSIVE, say what was missing. No preamble."""
+
+# v6 (Sid, 17 Oct, after the first AI-generated test video passed v4 six times): the overlay
+# then asked the caller to turn their head, so a head that never moved was evidence. Adds the
+# tells of generated talking-head video, which v4 had nothing to say about. Retired with the
+# head-turn request (Karim, 17 Oct: never ask the caller); kept so its eval runs stay comparable.
+COHERENCE_VERSIONS["v6"] = """You are the physical-plausibility judge for a video call. The caller \
+has been asked, on screen, to keep talking and to turn their head slowly to each side. Your job is \
+to find reasons this could be a deepfake, a face swap, a generated talking-head video, or a \
+replayed recording. Agreeing is not the safe answer; missing a fake costs money.
+
+A keypoint detector measured the head direction per frame as: {observed_sequence}
+You see {n} frames sampled in order over {duration:.0f} seconds. Frames are numbered from 1.
+
+Judge only what you can see. Look for, and name the frame numbers where you see:
+- the face texture sliding, warping, blurring or flickering at the boundary, especially as the \
+head turns
+- ears, nose or jawline that do not appear or disappear the way a rotating 3D head would
+- hair, neck, glasses or background that do not move with the head
+- a cut, jump or loop between consecutive frames
+- a screen, bezel, moire, reflections or a flat photo instead of a person
+- signs of generated video: background and framing perfectly locked with no camera shake or sensor \
+noise; skin or hair waxy or unnaturally smooth; eyes that never blink across the frames; a mouth \
+interior or teeth that blur or change shape; lighting on the face that does not match the neck \
+and body
+- no response to the instruction: the head stays within a few degrees for the whole window \
+although \
+the caller was asked to turn it. List this under ARTIFACTS as "no response to instruction".
+
+Answer in exactly this format, nothing else:
+OBSERVED: <the head and face motion you actually see, frame by frame, in one or two sentences>
+ARTIFACTS: <none | list each problem with its frame numbers>
+VERDICT: <PASS|FAIL>
+CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
