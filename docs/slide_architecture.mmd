@@ -1,0 +1,39 @@
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "IBM Plex Mono, Menlo, monospace", "fontSize": "14px"}, "flowchart": {"nodeSpacing": 36, "rankSpacing": 48, "curve": "basis"}}}%%
+%% LiveGuard: what runs today (17 Oct 2026). Paste the whole file into https://mermaid.live
+flowchart LR
+
+CALL["<b>The call</b><br/>Meet or Zoom tile, or webcam<br/>recorded in 8 s windows<br/>nobody is asked to do anything"]
+
+subgraph YOLO["YOLO11 pose · local, 1 s per window"]
+  G["<b>Geometry gates</b><br/>one face · alive · not frozen · no device<br/>finds the <b>hard moments</b>: a real sideways<br/>glance, a hand or object at the face<br/>crops the head for Cosmos"]
+end
+
+subgraph COSMOS["NVIDIA Cosmos Reason · GPU, 4 s per window"]
+  C["<b>Physics judge</b><br/>sees the hard frames first<br/>does the face stay attached as the head turns?<br/>warps, flicker, screens, cuts → FAIL"]
+end
+
+subgraph AGENT["Agent · LLM on W#38;B Inference"]
+  D["<b>Call decision</b><br/>2 strong windows → PASS<br/>any artefact → FAIL<br/>6 windows without a hard moment → not verified, FAIL<br/>writes the verdict note with similar past calls in context"]
+end
+
+OUT["<b>Overlay on the call</b><br/>a dot while watching<br/>PASS clears · FAIL stays on screen<br/>evidence frames + reasoning"]
+
+subgraph DATA["Every window logged"]
+  V["<b>VAST AI OS</b><br/>verdict log in VastDB<br/>clips archived to VSS<br/>Cosmos Embed1 search over past calls"]
+  W["<b>Weights #38; Biases</b><br/>every window a row in a run<br/>Weave trace: YOLO → Cosmos → agent<br/>prompt versions compared by eval"]
+end
+
+CALL ==> G
+G == "hard frames, gates" ==> C
+C == "artefacts + confidence" ==> D
+D ==> OUT
+D -.-> V
+D -.-> W
+V -. "similar calls" .-> D
+
+classDef box fill:#ffffff,stroke:#555555,color:#222222
+class CALL,G,C,D,OUT,V,W box
+style YOLO fill:#eef3fb,stroke:#5b7fb5,color:#2b4a7a
+style COSMOS fill:#e8f7ee,stroke:#2e7d32,color:#1b4d1e
+style AGENT fill:#fdf3e7,stroke:#d08a2f,color:#6b4a0f
+style DATA fill:#f3f3f3,stroke:#8a8a8a,color:#444444
