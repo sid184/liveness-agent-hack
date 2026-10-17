@@ -59,7 +59,13 @@ OBJECT_EVERY = 4  # the detection pass (devices, cups) runs on every 4th pose fr
 # Call decision.
 WINDOW_S = 8  # seconds per recorded window
 PASSES_NEEDED = 2  # clean windows before the caller is cleared
-MAX_WINDOWS = 8  # then stop watching: INCONCLUSIVE
+MAX_WINDOWS = 6  # then stop watching: the caller was never verified, which is a FAIL
+NOT_VERIFIED_REASON = (
+    "Not verified: {k} windows of natural conversation without a hard moment the agent could "
+    "clear the caller on (a real sideways glance, or a hand or object crossing the face). "
+    "Real callers give one within a few windows; recorded and generated video does not. "
+    "Treated as a FAIL: the action is blocked."
+)
 
 
 def parse_verdict(text: str) -> dict[str, Any]:
@@ -201,7 +207,7 @@ def decide_call(verdicts: list[str]) -> str:
     if verdicts.count("PASS") >= PASSES_NEEDED:
         return "PASS"
     if len(verdicts) >= MAX_WINDOWS:
-        return "INCONCLUSIVE"
+        return "FAIL"  # never verified
     return "WATCHING"
 
 
@@ -561,6 +567,9 @@ def finish_call(windows: list[SessionRecord], decision: str, persist: bool = Tru
             )
     last.signals["call"] = call
     last.signals["window_verdict"] = last.verdict
+    if decision == "FAIL" and "FAIL" not in [w.verdict for w in windows]:
+        last.reasoning = NOT_VERIFIED_REASON.format(k=len(windows))
+        call["reason"] = "not_verified"
     last.verdict = decision  # what the overlay and the history show for this call
     if index is not None:
         index.add(last)  # SQLite upserts; VastDB keeps the newest row per session

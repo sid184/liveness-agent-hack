@@ -189,8 +189,8 @@ def test_decide_call():
     # Passive: nobody was asked to move, so still windows keep the call watching, never fail it.
     assert decide_call(["INCONCLUSIVE"] * 3) == "WATCHING"
     assert decide_call(["INCONCLUSIVE", "PASS", "INCONCLUSIVE", "INCONCLUSIVE"]) == "WATCHING"
-    mixed = ["PASS", "INCONCLUSIVE", "ERROR", "INCONCLUSIVE"] + ["ERROR", "INCONCLUSIVE"] * 2
-    assert len(mixed) == MAX_WINDOWS and decide_call(mixed) == "INCONCLUSIVE"
+    never = ["INCONCLUSIVE"] * MAX_WINDOWS
+    assert decide_call(never[:-1]) == "WATCHING" and decide_call(never) == "FAIL"  # never verified
     assert decide_call(["ERROR", "PASS"]) == "WATCHING"
 
 
