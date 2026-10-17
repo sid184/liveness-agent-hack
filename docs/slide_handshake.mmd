@@ -1,0 +1,30 @@
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "IBM Plex Mono, Menlo, monospace", "fontSize": "15px"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 70, "curve": "basis"}}}%%
+%% LiveGuard: the YOLO <-> Cosmos handshake. Paste the whole file into https://mermaid.live
+flowchart LR
+
+W["<b>8 s window</b><br/>of the call"]
+
+subgraph Y["YOLO11 pose · measures"]
+  G["<b>40 frames, 1 s</b><br/>head yaw and pitch per frame<br/>one face · alive · not frozen · no device<br/><b>hard moments:</b> a real sideways glance,<br/>a hand or object at the face"]
+end
+
+subgraph C["NVIDIA Cosmos Reason · judges"]
+  J["<b>12 frames, 4 s</b><br/>prompt carries YOLO's readings:<br/><i>1: centre · 2: left · 3: hand at face</i><br/><i>look hardest at the marked frames</i><br/>does the face stay attached as the head turns?"]
+end
+
+subgraph D["Decision · neither alone"]
+  R["<b>strong window</b> = YOLO found a hard moment<br/>AND Cosmos saw no artefact there<br/>Cosmos artefact → FAIL · still face → never clears<br/>2 strong → PASS · 6 without → not verified"]
+end
+
+W ==> G
+G == "① which frames: hard moments first" ==> J
+G == "② the head, cropped" ==> J
+G == "③ its readings, in the prompt" ==> J
+J == "artefacts + confidence" ==> R
+G -. "gates" .-> R
+
+classDef box fill:#ffffff,stroke:#555555,color:#222222
+class W,G,J,R box
+style Y fill:#eef3fb,stroke:#5b7fb5,color:#2b4a7a
+style C fill:#e8f7ee,stroke:#2e7d32,color:#1b4d1e
+style D fill:#fdf3e7,stroke:#d08a2f,color:#6b4a0f
