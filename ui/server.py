@@ -63,10 +63,14 @@ def _pipeline() -> dict[str, Any]:
 
 
 def _transcode(src: Path, dst: Path) -> None:
-    """Browser webm has no frame count and a variable rate; give OpenCV a constant-rate mp4."""
+    """Browser webm has no frame count and a variable rate; give OpenCV a constant-rate mp4.
+
+    Also shrinks to 640 px wide: Mac cameras record 3024 px frames, and YOLO at that size spent
+    about 1.5 s per frame in preprocessing (measured 17 Oct). The model runs at 640 anyway.
+    """
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an", "-r", "15",
-        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "veryfast",
+        "-vf", "scale=640:-2", "-c:v", "libx264", "-preset", "veryfast",
         "-pix_fmt", "yuv420p", str(dst),
     ]  # fmt: skip
     proc = subprocess.run(cmd, capture_output=True, text=True)
