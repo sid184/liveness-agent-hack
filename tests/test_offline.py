@@ -108,8 +108,8 @@ def test_decide_call():
     assert decide_call(["INCONCLUSIVE"] * (NO_RESPONSE_WINDOWS - 1)) == "WATCHING"
     assert decide_call(["INCONCLUSIVE"] * NO_RESPONSE_WINDOWS) == "FAIL"  # asked, never turned
     assert decide_call(["INCONCLUSIVE", "PASS", "INCONCLUSIVE", "INCONCLUSIVE"]) == "WATCHING"
-    mixed = ["PASS", "INCONCLUSIVE", "ERROR", "INCONCLUSIVE"] * (MAX_WINDOWS // 4)
-    assert decide_call(mixed) == "INCONCLUSIVE"
+    mixed = ["PASS", "INCONCLUSIVE", "ERROR", "INCONCLUSIVE"] + ["ERROR", "INCONCLUSIVE"] * 2
+    assert len(mixed) == MAX_WINDOWS and decide_call(mixed) == "INCONCLUSIVE"
     assert decide_call(["ERROR", "PASS"]) == "WATCHING"
 
 

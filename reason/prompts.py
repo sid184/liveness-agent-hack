@@ -116,14 +116,16 @@ A keypoint detector measured the head direction per frame as: {observed_sequence
 You see {n} frames sampled in order over {duration:.0f} seconds. Frames are numbered from 1.
 
 Judge only what you can see. Look for, and name the frame numbers where you see:
-- the face texture sliding, warping, blurring or flickering at the boundary, especially as the head turns
+- the face texture sliding, warping, blurring or flickering at the boundary, especially as the \
+head turns
 - ears, nose or jawline that do not appear or disappear the way a rotating 3D head would
 - hair, neck, glasses or background that do not move with the head
 - a cut, jump or loop between consecutive frames
 - a screen, bezel, moire, reflections or a flat photo instead of a person
 - signs of generated video: background and framing perfectly locked with no camera shake or sensor \
 noise; skin or hair waxy or unnaturally smooth; eyes that never blink across the frames; a mouth \
-interior or teeth that blur or change shape; lighting on the face that does not match the neck and body
+interior or teeth that blur or change shape; lighting on the face that does not match the neck \
+and body
 - no response to the instruction: the head stays within a few degrees for the whole window although \
 the caller was asked to turn it. List this under ARTIFACTS as "no response to instruction".
 
