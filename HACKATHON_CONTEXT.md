@@ -111,7 +111,35 @@ Open questions to settle with the organisers: are pre-written code and personal 
 
 Roles: one on video pipeline (capture -> YOLO -> Cosmos -> index), one on agent and verdict log, one on UI and demo, one floating and preparing the pitch. Karim owns the quantification/scoring layer. Sid owns pitch and architecture.
 
-## Where we are now (updated Sat 10 Oct 2026, late evening)
+## Where we are now (hackathon day, Sat 17 Oct 2026, morning)
+
+- **Fresh repo for the day.** https://github.com/sid184/liveness-agent-hack, public, single `main`.
+  The prep work (Sat 10 and Sun 11 Oct) was copied in without history. Folder:
+  `~/development/liveness-agent-hack`. Karim: `make setup`, copy `.env.example` to `.env`, add keys.
+- **What runs today:** `make test` (7 offline tests), `make smoke-yolo`, `make smoke-vlm`,
+  `make smoke-pipeline` (clip -> challenge -> YOLO -> Cosmos -> verdict -> SQLite -> W&B mirror).
+  Cosmos on our RunPod pod is the default vision model (`.env`); the pod is **stopped** until
+  needed (`runpodctl pod start exfdzxdrcdk7st`, 4 min, 59 c/hr; stop after). Llama on NVIDIA
+  hosted is the fallback: comment out the three `VLM_*` lines in `.env`.
+- **Verdict log is SQLite** (`data/index/sessions.db`, `index/sqlite.py`), W&B gets the same
+  record via `eval.wandb_log.log_session`. VAST replaces the SQLite backend on the day if offered.
+- **Docs for the pitch:** `docs/ARCHITECTURE.md` (target workflow + today's architecture, Mermaid),
+  `docs/USE_CASES.md` (market, buyers, savings, features, sourced).
+- **Still open from prep, in priority order:**
+  1. No real footage has ever gone through the pipeline. Record clips first thing.
+  2. `combine()` is a placeholder. Agreed design: YOLO as a graded multiplier
+     (`score = cosmos_score * (0.3 + 0.7 * geo)`, geo = min(1, over_frames / 2)), threshold 0.5,
+     tune on labelled clips. Not yet implemented.
+  3. COHERENCE prompt is sycophantic (confidence 100 on a cartoon). Make it cite frames.
+  4. Face and hand detection: stock YOLO has neither.
+  5. Live webcam window, agent LLM in the loop, UI: all unbuilt.
+  6. Check whose W&B key is in `.env` before logging (was the employer's on 11 Oct).
+- **Ask the organisers first:** is a Cosmos endpoint provided today? Is VAST available, and how?
+  Are pre-written code and own footage allowed?
+- **1 pm checkpoint** stands: if challenge -> clip -> verdict isn't working end to end on real
+  footage, switch to the warehouse bottleneck fallback (see above).
+
+### Previous status (Sun 11 Oct 2026) kept for reference
 
 - **Repo skeleton exists, runs, and is on GitHub.** `make test` (offline), `make smoke-yolo`,
   `make smoke-vlm`, `make smoke-pipeline` (clip -> challenge -> YOLO -> VLM -> verdict -> local
