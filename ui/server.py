@@ -135,11 +135,14 @@ async def watch_window(
     if call_id not in _calls:
         raise HTTPException(404, "unknown call; POST /api/watch/start first")
     data = await clip.read()
-    async with _locks[call_id]:
-        windows = _calls[call_id]
-        if decide_call([w.signals.get("window_verdict") or w.verdict for w in windows]) not in (
-            "WATCHING",
-        ):
+    lock = _locks.get(call_id)
+    if lock is None:  # decided and cleaned up while this window was uploading
+        raise HTTPException(409, "this call is already decided")
+    async with lock:
+        windows = _calls.get(call_id)
+        if windows is None or decide_call(
+            [w.signals.get("window_verdict") or w.verdict for w in windows]
+        ) not in ("WATCHING",):
             raise HTTPException(409, "this call is already decided")
         folder = SESSIONS / uuid.uuid4().hex[:12]
         folder.mkdir(parents=True)

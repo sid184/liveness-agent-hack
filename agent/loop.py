@@ -140,6 +140,14 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
     cosmos = conf if vlm["verdict"] == "PASS" else 1 - conf
     gates = geo.get("gates") or {}
     score = round(cosmos * (1.0 if gates.get("smooth", True) else JUMP_PENALTY), 3)
+    still = not gates.get("moved", True)
+    artifacts = (vlm.get("artifacts") or "").lower()
+    # Prompt v6 reports a head that never turned as "no response to instruction". On its own
+    # that is a strike, not a verdict: one still window is a caller who has not read the overlay
+    # yet; three in a row is decided by decide_call. A FAIL with any other artefact stands.
+    only_no_response = "no response" in artifacts and not vlm.get("cited_frames")
+    if vlm["verdict"] == "FAIL" and still and only_no_response:
+        return "INCONCLUSIVE", score
     if vlm["verdict"] == "FAIL" or score < THRESHOLD:
         return "FAIL", score
     if not (gates.get("one_face", True) and gates.get("moved", True)):

@@ -101,6 +101,26 @@ def test_geometric_signal_and_combine():
     assert combine(nothing, {"verdict": None}) == ("ERROR", 0.0)
 
 
+def test_still_window_is_a_strike_not_a_fail():
+    still = {"gates": {"one_face": True, "smooth": True, "moved": False}}
+    moved = {"gates": {"one_face": True, "smooth": True, "moved": True}}
+    no_resp = {
+        "verdict": "FAIL",
+        "confidence": 1.0,
+        "artifacts": "no response to instruction",
+        "cited_frames": [],
+    }
+    assert combine(still, no_resp)[0] == "INCONCLUSIVE"
+    # the same artefact plus a real one, or on a window that did move, is a FAIL
+    warp = dict(
+        no_resp,
+        artifacts="no response to instruction; boundary warp frames 3-5",
+        cited_frames=[3, 4, 5],
+    )
+    assert combine(still, warp)[0] == "FAIL"
+    assert combine(moved, no_resp)[0] == "FAIL"
+
+
 def test_decide_call():
     assert decide_call(["PASS"]) == "WATCHING"
     assert decide_call(["INCONCLUSIVE", "PASS", "PASS"]) == "PASS"
