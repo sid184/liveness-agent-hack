@@ -126,7 +126,8 @@ head turns
 noise; skin or hair waxy or unnaturally smooth; eyes that never blink across the frames; a mouth \
 interior or teeth that blur or change shape; lighting on the face that does not match the neck \
 and body
-- no response to the instruction: the head stays within a few degrees for the whole window although \
+- no response to the instruction: the head stays within a few degrees for the whole window \
+although \
 the caller was asked to turn it. List this under ARTIFACTS as "no response to instruction".
 
 Answer in exactly this format, nothing else:
