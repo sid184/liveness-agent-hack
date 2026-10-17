@@ -28,3 +28,18 @@
 - **vLLM's `--reasoning-parser qwen3` can put the whole reply in `reasoning_content`.** When the
   model answers without think tags, `content` is empty. The client falls back to the reasoning
   field so callers always get text.
+- **A stopped RunPod pod is pinned to one physical host.** If that host has no free GPU, `pod start`
+  fails and RunPod will not move it. Create a new pod on the same network volume instead
+  (`networkVolumeId`, same data centre); the weights and venv are on the volume, so it is minutes.
+- **Pin the driver when creating a pod for this volume.** The vLLM venv on the volume is built for
+  CUDA 13.0. A host with a 12.8 driver crashes at engine start ("driver too old"). Pass
+  `allowedCudaVersions: ["13.0"]` on create (the API enum tops out at 13.0; 13.x hosts match).
+- **vLLM needs `ninja` on PATH at startup** for its kernel compile. The serve script now exports
+  the venv's `bin` onto PATH and installs ninja if missing. Without it: `FileNotFoundError: 'ninja'`
+  after a full four-minute load.
+- **SSH sessions on RunPod do not inherit the pod's env vars.** Pass `HF_TOKEN` and `HF_HOME`
+  inline when launching over SSH; the serve script checks for the token and exits otherwise.
+- **`pkill -f 'vllm serve'` kills the ssh session that issued it** (its own command line matches).
+  Use a self-excluding pattern like `'[v]llm serve'`.
+- **zsh does not word-split `$VAR`.** A command stored in a variable (`SSH="ssh -p ..."`) is
+  treated as one filename. Use a function or a small script file instead.

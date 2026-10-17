@@ -38,6 +38,10 @@ if [ ! -x "$VENV/bin/vllm" ]; then
   "$VENV/bin/pip" install -q "vllm>=0.11.0"
 fi
 
+# vLLM compiles kernels at startup and shells out to ninja; make the venv's tools visible.
+export PATH="$VENV/bin:$PATH"
+"$VENV/bin/python" -c "import ninja" 2>/dev/null || "$VENV/bin/pip" install -q ninja
+
 exec "$VENV/bin/vllm" serve "$MODEL" \
   --max-model-len "$MAX_LEN" \
   --media-io-kwargs '{"video": {"num_frames": -1}}' \
