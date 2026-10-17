@@ -1,7 +1,8 @@
 """One clip through the whole pipeline: challenge -> YOLO -> VLM -> verdict -> index.
 
 uv run python -m scripts.smoke_pipeline                         # synthetic clip
-uv run python -m scripts.smoke_pipeline --video data/clips/live_01.mp4 --label live --order up,down,left,right
+uv run python -m scripts.smoke_pipeline --video data/clips/live_01.mp4 --label live \
+    --order up,down,left,right
 """
 
 from __future__ import annotations
