@@ -134,9 +134,15 @@ function Body({ state, ready, onAction }: Omit<Props, "inline" | "win">) {
           shineColor="#5eead4"
           className="text-[17px] font-extrabold"
         />
-        <div className={`text-[12px] ${state.note?.includes("inconclusive") ? "text-warn" : "text-muted"}`}>
+        <div
+          className={
+            state.note?.includes("inconclusive")
+              ? "rounded border border-warn/60 bg-warn/10 px-2 py-1.5 text-[15px] font-bold leading-tight text-warn"
+              : "text-[13px] font-semibold text-accent"
+          }
+        >
           {state.note?.includes("inconclusive")
-            ? "Not enough movement yet: turn your head further, left then right."
+            ? "Turn your head: slowly left, then slowly right."
             : "Keep talking. Turn your head slowly to each side."}
         </div>
         <div className="h-[3px] overflow-hidden rounded bg-line">

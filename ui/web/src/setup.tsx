@@ -190,6 +190,17 @@ function App() {
       const windowMs = w.window_s * 1000;
       const startedAt = Date.now();
       let note = "";
+      // The check needs a head turn; a caller who never hears the request fails for nothing.
+      const say = (text: string) => {
+        try {
+          window.speechSynthesis?.cancel();
+          window.speechSynthesis?.speak(new SpeechSynthesisUtterance(text));
+        } catch {
+          /* no speech on this browser: the overlay text still shows it */
+        }
+      };
+      say("Liveness check. Keep talking, and turn your head slowly to each side.");
+      let nudged = false;
       const show = (windowNo: number, windowStartedAt: number) =>
         setOv({ kind: "watching", reason, windowNo, maxWindows: w.max_windows, windowMs,
                 windowStartedAt, startedAt, note });
@@ -206,6 +217,10 @@ function App() {
             body: form,
           });
           note = `last ${out.verdict.toLowerCase()}`;
+          if (out.verdict === "INCONCLUSIVE" && out.decision === "WATCHING" && !nudged) {
+            nudged = true;
+            say("Please turn your head slowly to the left, then slowly to the right.");
+          }
           if (out.decision !== "WATCHING") decided ??= out;
         } catch (e) {
           if (!decided) failed ??= e as Error; // a 409 after the decision is expected
