@@ -28,7 +28,15 @@ from typing import Any
 import numpy as np
 
 import scripts._paths  # noqa: F401
-from agent.loop import THRESHOLD, combine, judge, observe, run_session
+from agent.loop import (
+    NO_RESPONSE_WINDOWS,
+    THRESHOLD,
+    combine,
+    decide_call,
+    judge,
+    observe,
+    run_session,
+)
 from capture.frames import montage
 from config import settings
 from eval import tracing, vss_archive, wandb_log
@@ -105,6 +113,12 @@ def metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "accuracy": mean([1.0 if r["correct"] else 0.0 for r in ok]),
         "live_pass_rate": mean([1.0 if s >= THRESHOLD else 0.0 for s in live]),
         "attack_caught_rate": mean([1.0 if s < THRESHOLD else 0.0 for s in attack]),
+        "call_live_pass_rate": mean(
+            [1.0 if r.get("call") == "PASS" else 0.0 for r in rows if r["label"] == "live"]
+        ),
+        "call_attack_fail_rate": mean(
+            [1.0 if r.get("call") == "FAIL" else 0.0 for r in rows if r["label"] == "attack"]
+        ),
         "mean_score_live": mean(live),
         "mean_score_attack": mean(attack),
         "cosmos_mean_confidence": mean(
@@ -206,6 +220,9 @@ def main() -> None:
                     "cited_frames": ",".join(map(str, vlm.get("cited_frames") or [])),
                     "score": score,
                     "verdict": verdict,
+                    # What a live call decides if every window looks like this one: a still
+                    # window three times is a FAIL (no response), a clean window twice a PASS.
+                    "call": decide_call([verdict] * max(NO_RESPONSE_WINDOWS, 2)),
                     "correct": verdict == ("PASS" if label == "live" else "FAIL"),
                     "latency_s": round(time.perf_counter() - t0, 2),
                     "observed": vlm.get("observed"),
@@ -216,7 +233,8 @@ def main() -> None:
             r = rows[-1]
             print(
                 f"  {version} {clip.name:<32} {label:<6} cosmos={r['cosmos_verdict']} "
-                f"conf={r['cosmos_confidence']} geo={r['geo']} -> {verdict} {score}"
+                f"conf={r['cosmos_confidence']} geo={r['geo']} -> window {verdict} {score} "
+                f"-> call {r['call']}"
             )
         m = metrics(rows)
         summary[version] = m
