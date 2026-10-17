@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 from config import settings
-from index.base import SessionIndex, SessionRecord, tokens
+from index.base import SessionIndex, SessionRecord
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -36,9 +36,11 @@ VALUES
 class SqliteIndex(SessionIndex):
     """One SQLite file, one row per session. The source of truth for the verdict log.
 
-    `evidence` (list) and `signals` (dict) are stored as JSON text. Search is keyword overlap for
-    now; embeddings replace it later, VAST on the day.
+    `evidence` (list) and `signals` (dict) are stored as JSON text. Search (base class) is Cosmos
+    Embed1 cosine when vectors exist, keyword overlap otherwise.
     """
+
+    backend = "SQLite"
 
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path) if path else settings.data_dir / "index" / "sessions.db"
@@ -58,11 +60,11 @@ class SqliteIndex(SessionIndex):
         rows = self.conn.execute("SELECT * FROM sessions ORDER BY created_at").fetchall()
         return [self._to_record(r) for r in rows]
 
-    def search(self, query: str, k: int = 5) -> list[SessionRecord]:
-        q = tokens(query)
-        scored = [(len(q & tokens(r.text())), r.created_at, r) for r in self.all()]
-        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
-        return [r for s, _, r in scored[:k] if s > 0]
+    def get(self, session_id: str) -> SessionRecord | None:
+        row = self.conn.execute(
+            "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        return self._to_record(row) if row else None
 
     def where(
         self, challenge_id: str | None = None, label: str | None = None

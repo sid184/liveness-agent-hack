@@ -37,6 +37,7 @@ class VisionReasoner:
     ):
         self.model = model or settings.vlm_model
         self.frame_format = frame_format or settings.vlm_frame_format
+        self.max_images = settings.vlm_max_images
         # Hosted endpoints can queue for minutes; fail fast rather than hang the demo.
         self.client = OpenAI(
             base_url=base_url or settings.vlm_base_url,
@@ -71,6 +72,10 @@ class VisionReasoner:
                     "video_frames": [_data_url(im, max_edge) for im in images],
                 },
             ]
+        if self.max_images and len(images) > self.max_images:
+            # Endpoint caps images per prompt (event Cosmos3: 5); keep an even spread in order.
+            idx = np.linspace(0, len(images) - 1, self.max_images).round().astype(int)
+            images = [images[i] for i in idx]
         return [{"type": "text", "text": prompt}] + [
             {"type": "image_url", "image_url": {"url": _data_url(im, max_edge)}} for im in images
         ]

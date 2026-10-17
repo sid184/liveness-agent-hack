@@ -70,24 +70,14 @@ def head_pose(xy: np.ndarray, conf: np.ndarray, min_conf: float = 0.3) -> HeadPo
     )
 
 
-def directions_reached(poses: list[HeadPose | None]) -> dict[str, int | None]:
-    """First frame index at which each direction was seen, or None."""
-    first: dict[str, int | None] = {"up": None, "down": None, "left": None, "right": None}
-    for i, p in enumerate(poses):
-        if p is None:
-            continue
-        f = p.facing
-        if f in first and first[f] is None:
-            first[f] = i
-    return first
-
-
-def in_order(first: dict[str, int | None], order: list[str]) -> bool:
-    """True when every direction in `order` was reached, and in that sequence."""
-    idx = [first.get(d) for d in order]
-    if any(i is None for i in idx):
-        return False
-    return all(a < b for a, b in zip(idx, idx[1:], strict=False))
+def motion_range(poses: list[HeadPose | None]) -> tuple[float, float]:
+    """(yaw range, pitch range) over the measurable frames: how much the head actually turned."""
+    pts = [(p.yaw, p.pitch) for p in poses if p is not None]
+    if len(pts) < 2:
+        return 0.0, 0.0
+    arr = np.array(pts)
+    span = arr.max(axis=0) - arr.min(axis=0)
+    return float(span[0]), float(span[1])
 
 
 def max_jump(poses: list[HeadPose | None]) -> float:
