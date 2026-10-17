@@ -48,6 +48,11 @@ MIN_FACE_FRACTION = (
 # Informational; the hard frames, not this, decide the assurance level.
 MIN_YAW_RANGE = 0.35
 MIN_PITCH_RANGE = 0.4
+# A real sideways glance: peak |yaw - resting yaw| in the window. Measured 17 Oct on seven
+# generated fakes (max 0.32, including one that tilts and nods) and every real turn window from
+# three people (min 0.55). Tilts and nods read as pitch and do not count; face swaps and
+# generated heads break on yaw, so that is the hard moment that clears a window.
+TURN_PEAK_MIN = 0.5
 N_GEO_FRAMES = 40  # YOLO is cheap: about 4 fps over a 10 s clip, enough to see jumps
 OBJECT_EVERY = 4  # the detection pass (devices, cups) runs on every 4th pose frame
 
@@ -164,12 +169,16 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
         return "INCONCLUSIVE", score
     if not (gates.get("one_face", True) and gates.get("alive", True)):
         return "INCONCLUSIVE", score
-    if not (geo.get("cues") or {}).get("stress_frames"):
-        # Clean and alive, but the caller never gave a hard frame (a real head turn, a hand or
-        # object at the face). Measured 17 Oct on six generated talking heads and two real
-        # callers: every fake stayed under a yaw range of 0.34 with no stress frame; both real
-        # callers turned past 0.66 in natural conversation. A still clean window keeps the
-        # agent watching ("basic"); only strong windows clear the call.
+    cues = geo.get("cues") or {}
+    kinds = cues.get("stress_kinds") or []
+    turn_peak = geo.get("turn_peak")
+    real_turn = turn_peak is None or turn_peak >= TURN_PEAK_MIN
+    hard_moment = any(k != "head turned" for k in kinds) or ("head turned" in kinds and real_turn)
+    if not cues.get("stress_frames") or not hard_moment:
+        # Clean and alive, but no hard moment: no hand or object at the face, and no real
+        # sideways turn (a tilt or nod that reads as 'turned' does not count). A generated
+        # talking head looks exactly like this. Keep watching ("basic"); only strong windows
+        # clear the call.
         return "INCONCLUSIVE", score
     return "PASS", score
 
@@ -284,6 +293,10 @@ def observe(video_path: str, detector: Detector, objects: Detector | None = None
     geo["frame_indices"] = [f.index for f in geo_frames]
     geo["crop"] = head_crop(per_frame, geo_frames[0].image.shape) if geo_frames else None
     geo["pose_track"] = [None if c.pose is None else [c.pose.yaw, c.pose.pitch] for c in cues]
+    yaws = [t[0] for t in geo["pose_track"] if t]
+    geo["turn_peak"] = (
+        round(float(max(abs(y - float(np.median(yaws))) for y in yaws)), 3) if yaws else 0.0
+    )
     return {"geo": geo, "poses": [c.pose for c in cues]}
 
 
