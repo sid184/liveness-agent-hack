@@ -8,6 +8,7 @@ from agent.loop import (
     combine,
     decide_call,
     geometric_signal,
+    head_crop,
     parse_verdict,
 )
 from capture.frames import montage, synthetic_test_image, to_jpeg_bytes
@@ -15,6 +16,7 @@ from index.base import SessionRecord
 from index.local import LocalIndex
 from index.sqlite import SqliteIndex
 from perception import HeadPose, head_pose
+from perception.detector import Detection
 
 
 def test_synthetic_image_and_jpeg():
@@ -118,7 +120,20 @@ def test_still_window_is_a_strike_not_a_fail():
         cited_frames=[3, 4, 5],
     )
     assert combine(still, warp)[0] == "FAIL"
-    assert combine(moved, no_resp)[0] == "FAIL"
+    # YOLO saw the turn and Cosmos found nothing else wrong: the detector wins on movement
+    assert combine(moved, no_resp) == ("PASS", 0.9)
+    assert combine(moved, warp)[0] == "FAIL"
+
+
+def test_head_crop_from_keypoints():
+    xy, cf = _kp((100, 132), (120, 100), (80, 100))
+    d = Detection("person", 0.9, (60, 80, 140, 300), keypoints=xy, kp_conf=cf)
+    box = head_crop([[d], [d], []], (480, 640, 3))
+    assert box is not None
+    x1, y1, x2, y2 = box
+    assert x1 < 80 and x2 > 120 and y1 < 100 and y2 > 132  # contains the face points with margin
+    assert 0 <= x1 and 0 <= y1 and x2 <= 640 and y2 <= 480
+    assert head_crop([[], []], (480, 640, 3)) is None
 
 
 def test_decide_call():

@@ -43,7 +43,9 @@ INSTRUCTION = (
 THRESHOLD = 0.5
 JUMP_PENALTY = 0.5  # a cut or glitch between frames halves the Cosmos score
 MAX_JUMP = 0.8  # (yaw, pitch) jump between geometry frames above this is a cut, replay or glitch
-MIN_FACE_FRACTION = 0.9  # frames in which exactly one face must be measurable
+MIN_FACE_FRACTION = (
+    0.6  # frames with exactly one measurable face; a real turn loses a few at profile
+)
 # Natural head movement needed before a PASS counts. A still talking head shows Cosmos no 3D
 # structure to judge. Measured 17 Oct: deliberate turns span yaw 1.0 to 1.2.
 MIN_YAW_RANGE = 0.35  # a natural glance of about 30 degrees; measured 17 Oct on live windows
@@ -148,6 +150,15 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
     only_no_response = "no response" in artifacts and not vlm.get("cited_frames")
     if vlm["verdict"] == "FAIL" and still and only_no_response:
         return "INCONCLUSIVE", score
+    if vlm["verdict"] == "FAIL" and only_no_response and not still:
+        # YOLO measured the turn; Cosmos missed it and found nothing else wrong. The detector
+        # is the instrument for "did the head move"; Cosmos is the judge of realism, and it
+        # reported no artefact. Pass on geometry, with Cosmos's own confidence that nothing is
+        # wrong, capped below a clean PASS.
+        pass_score = round(min(conf, 0.9) * (1.0 if gates.get("smooth", True) else JUMP_PENALTY), 3)
+        if pass_score >= THRESHOLD and gates.get("one_face", True):
+            return "PASS", pass_score
+        return "INCONCLUSIVE", pass_score
     if vlm["verdict"] == "FAIL" or score < THRESHOLD:
         return "FAIL", score
     if not (gates.get("one_face", True) and gates.get("moved", True)):
@@ -197,13 +208,48 @@ def _stage(step: str, component: str, t0: float, **detail: Any) -> dict[str, Any
 
 
 @op("yolo.pose_gates", drop=("detector",))
+def head_crop(
+    per_frame: list[list[Detection]], shape: tuple[int, ...], margin: float = 1.2
+) -> list[int] | None:
+    """One box around the head across the whole window, from the face keypoints of the most
+    confident person in each frame, grown by `margin` of its size and clamped to the image.
+
+    A call recording is usually a whole meeting window; the face is a small patch of it. Cosmos
+    judges a 640 px face far better than a 640 px window with a face in it (17 Oct).
+    """
+    pts = []
+    for dets in per_frame:
+        people = [d for d in dets if d.keypoints is not None and d.kp_conf is not None]
+        if not people:
+            continue
+        d = max(people, key=lambda d: d.conf)
+        ok = d.kp_conf[:5] >= 0.3
+        if ok.any():
+            pts.append(d.keypoints[:5][ok])
+    if not pts:
+        return None
+    allp = np.concatenate(pts)
+    x1, y1 = allp.min(axis=0)
+    x2, y2 = allp.max(axis=0)
+    w, h = max(x2 - x1, 1.0), max(y2 - y1, 1.0)
+    side = max(w, h) * (1 + 2 * margin)  # square-ish, hair to collar
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2 + h * 0.4  # the face sits below the eye line
+    H, W = shape[:2]
+    bx1, by1 = int(max(0, cx - side / 2)), int(max(0, cy - side / 2))
+    bx2, by2 = int(min(W, cx + side / 2)), int(min(H, cy + side / 2))
+    if bx2 - bx1 < 32 or by2 - by1 < 32:
+        return None
+    return [bx1, by1, bx2, by2]
+
+
 def observe(video_path: str, detector: Detector) -> dict[str, Any]:
-    """YOLO pose on a dense sample: per-frame head pose and the three gates."""
+    """YOLO pose on a dense sample: per-frame head pose, the three gates, and a head crop."""
     geo_frames = sample_frames(video_path, N_GEO_FRAMES)
     per_frame = [detector.detect(f.image) for f in geo_frames]
     poses = poses_from_detections(per_frame)
     geo = geometric_signal(poses)
     geo["frame_indices"] = [f.index for f in geo_frames]
+    geo["crop"] = head_crop(per_frame, geo_frames[0].image.shape) if geo_frames else None
     geo["pose_track"] = [None if p is None else [p.yaw, p.pitch] for p in poses]
     return {"geo": geo, "poses": poses}
 
@@ -254,6 +300,11 @@ def judge(
         n_frames = min(n_frames, reasoner.max_images)  # keep the prompt's frame numbers true
     picked = pick_frames(geo, n_frames)
     frames = read_frames(video_path, picked) if picked else sample_frames(video_path, n_frames)
+    crop = geo.get("crop")
+    if crop:
+        x1, y1, x2, y2 = crop
+        for f in frames:
+            f.image = f.image[y1:y2, x1:x2]
     geo_idx = geo.get("frame_indices") or []
     facing_at = []
     for f in frames:
