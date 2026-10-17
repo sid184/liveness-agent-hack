@@ -75,7 +75,9 @@ def test_head_pose_directions():
     assert up.facing == "up"
     down = head_pose(*_kp((100, 160), (120, 100), (80, 100)))
     assert down.facing == "down"
-    assert head_pose(*_kp((100, 132), None, (80, 100))) is None
+    prof = head_pose(*_kp((100, 132), None, (80, 100)))  # only the right eye visible
+    assert prof is not None and prof.profile and prof.yaw == 1.0
+    assert head_pose(*_kp((100, 132), None, None)) is None
 
 
 def test_geometric_signal_and_combine():

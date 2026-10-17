@@ -4,12 +4,20 @@
 """
 
 from perception.detector import Detection, Detector
-from perception.pose import HeadPose, directions_reached, head_pose, in_order, max_jump
+from perception.pose import (
+    HeadPose,
+    classify,
+    directions_reached,
+    head_pose,
+    in_order,
+    max_jump,
+)
 
 __all__ = [
     "Detection",
     "Detector",
     "HeadPose",
+    "classify",
     "directions_reached",
     "head_pose",
     "in_order",

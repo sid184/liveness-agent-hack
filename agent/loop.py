@@ -16,6 +16,7 @@ from perception import (
     Detection,
     Detector,
     HeadPose,
+    classify,
     directions_reached,
     head_pose,
     in_order,
@@ -85,7 +86,7 @@ def geometric_signal(poses: list[HeadPose | None], ch: IssuedChallenge) -> dict[
     return {
         "frames": n,
         "measurable_frames": measurable,
-        "sequence": [p.facing if p else "?" for p in poses],
+        "sequence": classify(poses),
         "first_seen": first,
         "reached": reached,
         "max_jump": round(jump, 3),
