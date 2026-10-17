@@ -112,6 +112,7 @@ def _summary(record: SessionRecord) -> dict[str, Any]:
         "created_at": record.created_at,
         "label": record.label,
         "windows": len(call.get("windows") or []) or None,  # set on a call's deciding window
+        "window_verdicts": [w.get("verdict") for w in call.get("windows") or []] or None,
         "assurance": call.get("assurance") or record.signals.get("assurance"),
         "window_no": record.signals.get("window_no"),
     }
