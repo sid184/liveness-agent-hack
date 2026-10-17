@@ -108,8 +108,10 @@ def test_geometric_signal_and_combine():
         "no_device": True,
     }
     assert geo["moved"] is False and geo["cues"]["stress_frames"] == 0
-    assert combine(geo, {"verdict": "PASS", "confidence": 0.9}) == ("PASS", 0.9)
-    assert assurance(geo, "PASS") == "basic"
+    # Clean and alive but no hard frame: a generated talking head looks exactly like this, so
+    # the window does not clear the caller (basic assurance, keep watching).
+    assert combine(geo, {"verdict": "PASS", "confidence": 0.9}) == ("INCONCLUSIVE", 0.9)
+    assert assurance(geo, "INCONCLUSIVE") == "basic"
     # Cosmos naming an artefact always fails the window, whatever YOLO saw.
     assert combine(geo, {"verdict": "FAIL", "confidence": 0.8}) == ("FAIL", 0.2)
     # A photo: identical shape every frame -> not alive -> nothing to clear the caller on.

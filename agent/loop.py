@@ -144,7 +144,9 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
     FAIL on hard evidence: Cosmos names an artefact, the face is inside a device, the feed is
     frozen, or the score is under the threshold (a jump between frames halves it). PASS needs one
     face showing natural micro-movement; without it the window is INCONCLUSIVE and the agent
-    keeps watching. A still head is fine: `assurance` says how strong a PASS is.
+    keeps watching. A clean, alive window with no hard frame is INCONCLUSIVE too (basic
+    assurance): a generated talking head looks exactly like that. Only a window where the head
+    turned, or a hand or object crossed the face, and Cosmos found nothing wrong, can clear.
     """
     if vlm.get("verdict") is None:
         return "ERROR", 0.0
@@ -157,6 +159,13 @@ def combine(geo: dict[str, Any], vlm: dict[str, Any]) -> tuple[str, float]:
         return "FAIL", score
     if not (gates.get("one_face", True) and gates.get("alive", True)):
         return "INCONCLUSIVE", score
+    if not (geo.get("cues") or {}).get("stress_frames"):
+        # Clean and alive, but the caller never gave a hard frame (a real head turn, a hand or
+        # object at the face). Measured 17 Oct on six generated talking heads and two real
+        # callers: every fake stayed under a yaw range of 0.34 with no stress frame; both real
+        # callers turned past 0.66 in natural conversation. A still clean window keeps the
+        # agent watching ("basic"); only strong windows clear the call.
+        return "INCONCLUSIVE", score
     return "PASS", score
 
 
@@ -164,9 +173,11 @@ def assurance(geo: dict[str, Any], verdict: str) -> str | None:
     """How strong a PASS is. strong: Cosmos judged at least one stress frame (head turned, hand
     or object at the face) and found it clean, which is where a face swap breaks. basic: clean
     and alive, but the caller never gave a hard frame, so a still face swap is not ruled out."""
-    if verdict != "PASS":
-        return None
-    return "strong" if (geo.get("cues") or {}).get("stress_frames") else "basic"
+    if verdict == "PASS":
+        return "strong"
+    if verdict == "INCONCLUSIVE" and (geo.get("gates") or {}).get("alive"):
+        return "basic"  # clean and alive, no hard frame yet: not cleared
+    return None
 
 
 def decide_call(verdicts: list[str]) -> str:
