@@ -54,6 +54,14 @@ N_GEO_FRAMES = 40  # YOLO is cheap: about 4 fps over a 10 s clip, enough to see 
 WINDOW_S = 8  # seconds per recorded window
 PASSES_NEEDED = 2  # clean windows before the caller is cleared
 MAX_WINDOWS = 8  # then stop watching: INCONCLUSIVE
+# The overlay asks for a head turn. A caller who shows none for this many windows in a row has
+# not responded to the liveness request: a pre-rendered video cannot, a person was told to.
+NO_RESPONSE_WINDOWS = 3
+NO_RESPONSE_REASON = (
+    "No response to the liveness request: the caller was asked to turn their head and the "
+    "detector saw no turn in {k} consecutive windows. A recorded or generated video cannot "
+    "respond; a live person can. Treated as a FAIL."
+)
 
 
 def parse_verdict(text: str) -> dict[str, Any]:
@@ -145,9 +153,17 @@ def decide_call(verdicts: list[str]) -> str:
         return "FAIL"
     if verdicts.count("PASS") >= PASSES_NEEDED:
         return "PASS"
+    if no_response(verdicts):
+        return "FAIL"
     if len(verdicts) >= MAX_WINDOWS:
         return "INCONCLUSIVE"
     return "WATCHING"
+
+
+def no_response(verdicts: list[str]) -> bool:
+    """The last NO_RESPONSE_WINDOWS windows all failed the gates (no usable head movement)."""
+    tail = verdicts[-NO_RESPONSE_WINDOWS:]
+    return len(tail) == NO_RESPONSE_WINDOWS and all(v == "INCONCLUSIVE" for v in tail)
 
 
 def _where(url: str) -> str:
@@ -416,6 +432,9 @@ def finish_call(windows: list[SessionRecord], decision: str, persist: bool = Tru
             )
     last.signals["call"] = call
     last.signals["window_verdict"] = last.verdict
+    if decision == "FAIL" and no_response([w.verdict for w in windows]):
+        last.reasoning = NO_RESPONSE_REASON.format(k=NO_RESPONSE_WINDOWS)
+        call["reason"] = "no_response"
     last.verdict = decision  # what the overlay and the history show for this call
     if index is not None:
         index.add(last)  # SQLite upserts; VastDB keeps the newest row per session
