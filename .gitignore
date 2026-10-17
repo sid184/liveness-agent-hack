@@ -23,3 +23,9 @@ data/*
 .DS_Store
 .vscode/
 .idea/
+
+# UI build tooling (ui/static is the committed build output)
+ui/web/node_modules/
+ui/web/dist/
+.vercel/
+weave/

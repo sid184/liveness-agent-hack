@@ -53,7 +53,8 @@ def head_pose(xy: np.ndarray, conf: np.ndarray, min_conf: float = 0.3) -> HeadPo
 
     Returns None when the nose or both eyes are missing (face out of frame or facing away).
     With exactly one eye visible the head is in full profile: the yaw is saturated to +-1 by
-    which eye we can see, and the pitch is unknown.
+    which eye we can see, and the pitch is unknown. Measured 17 Oct: without this, every full
+    turn in a real clip read as "no measurement", exactly where the signal matters most.
     """
     if conf[NOSE] < min_conf:
         return None
@@ -140,6 +141,19 @@ def in_order(first: dict[str, int | None], order: list[str]) -> bool:
     if any(i is None for i in idx):
         return False
     return all(a < b for a, b in zip(idx, idx[1:], strict=False))
+
+
+def motion_range(poses: list[HeadPose | None]) -> tuple[float, float]:
+    """(yaw range, pitch range): how much the head actually turned.
+
+    Yaw uses every measurable frame, so a full profile (saturated +-1) counts as the big turn it
+    is. Pitch uses frontal frames only, because a profile frame's pitch is unknown.
+    """
+    yaws = [p.yaw for p in poses if p is not None]
+    pitches = [p.pitch for p in poses if p is not None and not p.profile]
+    yr = max(yaws) - min(yaws) if len(yaws) >= 2 else 0.0
+    pr = max(pitches) - min(pitches) if len(pitches) >= 2 else 0.0
+    return float(yr), float(pr)
 
 
 def max_jump(poses: list[HeadPose | None]) -> float:

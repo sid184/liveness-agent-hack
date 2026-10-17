@@ -11,6 +11,7 @@ from perception.pose import (
     head_pose,
     in_order,
     max_jump,
+    motion_range,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "head_pose",
     "in_order",
     "max_jump",
+    "motion_range",
 ]

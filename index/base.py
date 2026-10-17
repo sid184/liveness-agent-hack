@@ -40,13 +40,65 @@ class SessionRecord:
         return f"{self.challenge_id} {self.verdict} {self.instruction} {self.reasoning}"
 
 
+def rank(
+    query: str,
+    records: list[SessionRecord],
+    k: int = 5,
+    query_vec: list[float] | None = None,
+) -> list[SessionRecord]:
+    """Most relevant records for a query. Cosmos Embed1 cosine when the query and the records
+    carry vectors (`signals["embedding"]`), keyword overlap otherwise. Newest first on ties."""
+    vectors = [r.signals.get("embedding") for r in records]
+    if query_vec and any(vectors):
+        from index.embed import cosine
+
+        scored = [
+            (cosine(query_vec, v) if v else -1.0, r.created_at, r)
+            for v, r in zip(vectors, records, strict=True)
+        ]
+        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        return [r for s, _, r in scored[:k] if s > 0]
+    q = tokens(query)
+    scored_kw = [(len(q & tokens(r.text())), r.created_at, r) for r in records]
+    scored_kw.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return [r for s, _, r in scored_kw[:k] if s > 0]
+
+
 class SessionIndex(ABC):
+    backend = "base"  # shown on the session page next to "Verdict log"
+
     @abstractmethod
     def add(self, record: SessionRecord) -> None: ...
 
     @abstractmethod
-    def search(self, query: str, k: int = 5) -> list[SessionRecord]:
-        """Most relevant past sessions for a natural-language query."""
-
-    @abstractmethod
     def all(self) -> list[SessionRecord]: ...
+
+    def search(
+        self, query: str, k: int = 5, query_vec: list[float] | None = None
+    ) -> list[SessionRecord]:
+        """Most relevant past sessions for a natural-language query."""
+        if query_vec is None:
+            from index.embed import embed
+
+            query_vec = embed(query)
+        return rank(query, self.all(), k, query_vec)
+
+    def get(self, session_id: str) -> SessionRecord | None:
+        return next((r for r in self.all() if r.session_id == session_id), None)
+
+    def where(
+        self, challenge_id: str | None = None, label: str | None = None
+    ) -> list[SessionRecord]:
+        """Plain filter, newest first."""
+        rows = [
+            r
+            for r in self.all()
+            if (challenge_id is None or r.challenge_id == challenge_id)
+            and (label is None or r.label == label)
+        ]
+        return sorted(rows, key=lambda r: r.created_at, reverse=True)
+
+    def similar(self, record: SessionRecord, k: int = 3) -> list[SessionRecord]:
+        """Past sessions most like this one, excluding itself."""
+        hits = self.search(record.text(), k + 1, query_vec=record.signals.get("embedding"))
+        return [r for r in hits if r.session_id != record.session_id][:k]

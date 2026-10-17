@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 
 from config import settings
-from index.base import SessionIndex, SessionRecord, tokens
+from index.base import SessionIndex, SessionRecord
 
 
 class LocalIndex(SessionIndex):
-    """JSONL on disk, keyword-overlap search. The original backend; SqliteIndex is the default."""
+    """JSONL on disk. The original backend; SqliteIndex is the default."""
+
+    backend = "JSONL"
 
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path) if path else settings.data_dir / "index" / "sessions.jsonl"
@@ -23,9 +25,3 @@ class LocalIndex(SessionIndex):
             return []
         with self.path.open(encoding="utf-8") as f:
             return [SessionRecord.from_dict(json.loads(line)) for line in f if line.strip()]
-
-    def search(self, query: str, k: int = 5) -> list[SessionRecord]:
-        q = tokens(query)
-        scored = [(len(q & tokens(r.text())), r.created_at, r) for r in self.all()]
-        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
-        return [r for s, _, r in scored[:k] if s > 0]

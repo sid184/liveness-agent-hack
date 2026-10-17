@@ -59,6 +59,22 @@ def sample_frames(path: str | Path, n: int = 8) -> list[Frame]:
     return frames
 
 
+def read_frames(path: str | Path, indices: list[int]) -> list[Frame]:
+    """Specific frames by index, in the order given."""
+    cap = open_source(str(path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frames: list[Frame] = []
+    try:
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+            ok, image = cap.read()
+            if ok:
+                frames.append(Frame(image=image, index=int(idx), t_seconds=int(idx) / fps))
+    finally:
+        cap.release()
+    return frames
+
+
 def read_image(path: str | Path) -> np.ndarray:
     image = cv2.imread(str(path))
     if image is None:
@@ -144,3 +160,32 @@ def synthetic_test_clip(save_to: str | Path, seconds: float = 4.0, fps: int = 15
     finally:
         writer.release()
     return save_to
+
+
+def split_clip(path: str | Path, seconds: float, out_dir: str | Path) -> list[Path]:
+    """Cut a recording into back-to-back windows of `seconds` (re-encoded so every window
+    starts on a keyframe). Used to replay a recorded call as the windows a live call would send."""
+    import subprocess
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for old in out.glob("window_*.mp4"):
+        old.unlink()
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error", "-i", str(path), "-an", "-c:v", "libx264",
+        "-preset", "veryfast", "-force_key_frames", f"expr:gte(t,n_forced*{seconds})",
+        "-f", "segment", "-segment_time", str(seconds), "-reset_timestamps", "1",
+        str(out / "window_%02d.mp4"),
+    ]  # fmt: skip
+    subprocess.run(cmd, check=True, capture_output=True)
+    windows = sorted(out.glob("window_*.mp4"))
+    # A last sliver under a second has too few frames to judge.
+    if len(windows) > 1:
+        cap = open_source(str(windows[-1]))
+        n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        cap.release()
+        if n / fps < 1.0:
+            windows[-1].unlink()
+            windows = windows[:-1]
+    return windows

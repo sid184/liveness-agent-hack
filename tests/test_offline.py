@@ -1,12 +1,9 @@
 """Fast tests with no network and no model weights."""
 
-import random
-
 import numpy as np
 
-from agent.loop import combine, geometric_signal, parse_verdict
+from agent.loop import combine, decide_call, geometric_signal, parse_verdict
 from capture.frames import montage, synthetic_test_image, to_jpeg_bytes
-from challenge import issue
 from index.base import SessionRecord
 from index.local import LocalIndex
 from index.sqlite import SqliteIndex
@@ -23,18 +20,6 @@ def test_montage_tiles_in_order():
     tiles = montage([synthetic_test_image()] * 5, cols=4, tile_w=160)
     assert tiles.shape[1] == 160 * 4
     assert tiles.shape[0] == 2 * 120
-
-
-def test_issue_shuffles_order():
-    a = issue("head_circle", rng=random.Random(0))
-    b = issue("head_circle", rng=random.Random(1))
-    assert sorted(a.order) == ["down", "left", "right", "up"]
-    assert a.order != b.order
-    assert "then" in a.instruction and "{" not in a.instruction
-    assert a.deadline > a.issued_at
-    pinned = issue("head_circle", params={"order": ("up", "down", "left", "right")})
-    assert pinned.order == ["up", "down", "left", "right"]
-    assert "up, then down, then left, then right" in pinned.instruction
 
 
 def test_parse_verdict():
@@ -81,41 +66,40 @@ def test_head_pose_directions():
 
 
 def test_geometric_signal_and_combine():
-    ch = issue("head_circle", rng=random.Random(0))
-    seq = ["centre"]
-    for d in ch.order:
-        seq += [d, "centre"]
-    # Build poses that face each direction in the asked order, smoothly.
     table = {
         "centre": (0.0, 0.0),
         "left": (0.7, 0.0),
         "right": (-0.7, 0.0),
         "up": (0.0, 0.6),
-        "down": (0.0, -0.6),
     }
-    poses = [HeadPose(*table[s], True, True, 0.9) for s in seq]
-    geo = geometric_signal(poses, ch)
-    assert geo["gates"] == {
-        "one_face": True,
-        "all_directions": True,
-        "in_order": True,
-        "smooth": True,
-    }
-    assert geo["geo"] == 1.0
-    assert combine(geo, {"verdict": "PASS", "confidence": 1.0}) == ("PASS", 1.0)
-    # Wrong order: same directions, reversed.
-    rseq = ["centre"]
-    for d in reversed(ch.order):
-        rseq += [d, "centre"]
-    rev = [HeadPose(*table[s], True, True, 0.9) for s in rseq]
-    geo_rev = geometric_signal(rev, ch)
-    assert geo_rev["gates"]["all_directions"] and not geo_rev["gates"]["in_order"]
-    # Geometry seeing nothing drags a confident PASS to a FAIL; it never lifts a FAIL.
-    nothing = geometric_signal([None] * 6, ch)
-    assert nothing["geo"] == 0.0
-    assert combine(nothing, {"verdict": "PASS", "confidence": 1.0}) == ("FAIL", 0.3)
+    moving = [HeadPose(*table[s], True, True, 0.9) for s in
+              ["centre", "left", "centre", "right", "centre", "up", "centre"]]  # fmt: skip
+    geo = geometric_signal(moving)
+    assert geo["gates"] == {"one_face": True, "smooth": True, "moved": True}
+    assert geo["geo"] == 1.0 and geo["yaw_range"] == 1.4
+    assert combine(geo, {"verdict": "PASS", "confidence": 0.9}) == ("PASS", 0.9)
+    # Cosmos naming an artefact always fails the window, whatever YOLO saw.
     assert combine(geo, {"verdict": "FAIL", "confidence": 0.8}) == ("FAIL", 0.2)
-    assert combine(geo, {"verdict": None}) == ("ERROR", 0.0)
+    # A still head: Cosmos may say PASS, but there was nothing to judge.
+    still = geometric_signal([HeadPose(0.0, 0.0, True, True, 0.9)] * 6)
+    assert still["gates"]["moved"] is False
+    assert combine(still, {"verdict": "PASS", "confidence": 1.0}) == ("INCONCLUSIVE", 1.0)
+    # A jump between frames (cut, glitch) halves the score.
+    jumpy = geometric_signal([HeadPose(*table[s], True, True, 0.9) for s in ["left", "right"]])
+    assert jumpy["gates"]["smooth"] is False
+    assert combine(jumpy, {"verdict": "PASS", "confidence": 0.9}) == ("FAIL", 0.45)
+    # Nobody in frame.
+    nothing = geometric_signal([None] * 6)
+    assert nothing["geo"] == 0.0
+    assert combine(nothing, {"verdict": None}) == ("ERROR", 0.0)
+
+
+def test_decide_call():
+    assert decide_call(["PASS"]) == "WATCHING"
+    assert decide_call(["INCONCLUSIVE", "PASS", "PASS"]) == "PASS"
+    assert decide_call(["PASS", "FAIL"]) == "FAIL"
+    assert decide_call(["INCONCLUSIVE"] * 6) == "INCONCLUSIVE"
+    assert decide_call(["ERROR", "PASS"]) == "WATCHING"
 
 
 def test_local_index_roundtrip(tmp_path):
@@ -151,3 +135,141 @@ def test_sqlite_index_roundtrip(tmp_path):
     assert idx.where(challenge_id="object_pass", label="attack") == []
     idx.add(a)  # same session_id twice is an upsert, not a duplicate
     assert len(idx.all()) == 2
+
+
+def test_rank_prefers_embeddings_then_keywords():
+    from index.base import rank
+
+    a = SessionRecord("head_circle", "turn", "PASS", 0.9, "smooth rigid turn")
+    b = SessionRecord("head_circle", "turn", "FAIL", 0.1, "texture slides at profile")
+    a.signals["embedding"] = [1.0, 0.0]
+    b.signals["embedding"] = [0.0, 1.0]
+    assert [r.session_id for r in rank("anything", [a, b], 1, query_vec=[0.1, 0.9])] == [
+        b.session_id
+    ]
+    # No query vector: keyword overlap.
+    assert rank("slides at profile", [a, b], 1)[0].session_id == b.session_id
+
+
+def test_index_similar_excludes_self(tmp_path):
+    idx = SqliteIndex(tmp_path / "s.db")
+    a = SessionRecord("head_circle", "turn", "FAIL", 0.1, "texture slides at profile")
+    b = SessionRecord("head_circle", "turn", "FAIL", 0.2, "texture slides at the jaw")
+    a.signals["embedding"], b.signals["embedding"] = [1.0, 0.1], [0.9, 0.2]
+    idx.add(a)
+    idx.add(b)
+    assert [r.session_id for r in idx.similar(a)] == [b.session_id]
+    assert idx.get(b.session_id).reasoning == b.reasoning
+
+
+def test_parse_verdict_think_answer():
+    text = (
+        "<think>frame 3 looks odd</think><answer>OBSERVED: turns left\n"
+        "ARTIFACTS: texture slides in frame 3\nVERDICT: FAIL\nCONFIDENCE: 90</answer>"
+    )
+    v = parse_verdict(text)
+    assert v["verdict"] == "FAIL" and v["cited_frames"] == [3] and v["confidence"] == 0.9
+
+
+def test_eval_labels_metrics():
+    from scripts.eval_clips import label_from_tags, label_of, metrics
+
+    assert label_from_tags(["fraud", "team_10", "liveness"]) is None
+    assert label_from_tags(["liveness", "live"]) == "live"
+    assert label_from_tags(["liveness", "Attack"]) == "attack"
+
+    assert label_of("live_01_udlr.mp4") == "live"
+    assert label_of("attack_faceswap_02.mp4") == "attack"
+    assert label_of("Screen_Replay.mov") == "attack"
+    assert label_of("notes.mp4") is None
+    rows = [
+        {"label": "live", "score": 0.8, "verdict": "PASS", "correct": True,
+         "cosmos_confidence": 0.8, "latency_s": 1.0},
+        {"label": "attack", "score": 0.2, "verdict": "FAIL", "correct": True,
+         "cosmos_confidence": 0.8, "latency_s": 1.0},
+    ]  # fmt: skip
+    m = metrics(rows)
+    assert m["accuracy"] == 1.0 and m["separation"] == 0.6 and m["margin"] == 0.6
+
+
+def test_vast_row_roundtrip_and_vss_tags():
+    from eval.vss_archive import tags_for
+    from index.vast import from_row, to_row
+
+    r = SessionRecord(
+        "head_circle", "turn", "FAIL", 0.12, "slides", evidence=["a.mp4"], label="attack",
+        signals={"vlm": {"verdict": "FAIL"}, "geometric": {"geo": 0.75},
+                 "vss": {"object_key": "k"}},
+    )  # fmt: skip
+    row = to_row(r)
+    assert row["challenge_order"] == "" and row["geo"] == 0.75
+    assert row["vss_object_key"] == "k" and row["clip"] == "a.mp4"
+    assert from_row(row) == r
+    assert tags_for("FAIL", "attack", "abc") == [
+        "liveness-session",
+        "verdict-fail",
+        "session-abc",
+        "label-attack",
+    ]
+
+
+def test_run_session_offline(tmp_path, monkeypatch):
+    """Whole session with a fake detector and a fake Cosmos: stack labels, frames saved."""
+    import agent.loop as loop
+    from capture.frames import synthetic_test_clip
+    from perception import Detection
+    from reason.vlm import VlmResult
+
+    monkeypatch.setattr(loop, "embed", lambda text: None)
+    monkeypatch.setattr(loop.tracing, "init", lambda: False)
+    monkeypatch.setattr(loop.agent_llm, "enabled", lambda: False)
+    clip = synthetic_test_clip(tmp_path / "c.mp4")
+
+    class FakeDetector:
+        def detect(self, image):
+            xy, cf = _kp((100, 132), (120, 100), (80, 100))
+            return [Detection("person", 0.9, (0, 0, 10, 10), keypoints=xy, kp_conf=cf)]
+
+    class FakeReasoner:
+        frame_format, max_images = "images", 5
+
+        class client:  # noqa: N801
+            base_url = "http://localhost/v1"
+
+        def describe(self, images, prompt, video_path=None):
+            assert "5 frames" in prompt  # capped to max_images, prompt agrees
+            text = "OBSERVED: still\nARTIFACTS: flat in frame 2\nVERDICT: FAIL\nCONFIDENCE: 80"
+            return VlmResult(text, 0.1, "fake-cosmos", None)
+
+    rec = loop.run_session(
+        clip,
+        detector=FakeDetector(),
+        reasoner=FakeReasoner(),
+        evidence_dir=tmp_path / "ev",
+        archive=False,
+        persist=False,
+    )
+    assert rec.verdict == "FAIL" and rec.signals["vlm"]["cited_frames"] == [2]
+    steps = [s["step"] for s in rec.signals["stack"]]
+    assert steps[:2] == ["Head-pose gates", "Physical coherence"]
+    assert len([e for e in rec.evidence if e.endswith(".jpg")]) == 5
+    done = loop.finish_call([rec], "FAIL", persist=False)
+    assert done.verdict == "FAIL" and done.signals["call"]["decision"] == "FAIL"
+    assert done.signals["window_verdict"] == "FAIL"
+
+
+def test_pick_frames_takes_extremes_in_time_order():
+    from agent.loop import pick_frames
+
+    track = [[0.0, 0.0]] * 40
+    track = [list(t) for t in track]
+    track[7] = [0.9, 0.0]  # furthest left
+    track[30] = [-0.8, 0.0]  # furthest right
+    track[15] = [0.0, 0.6]  # furthest up
+    track[22] = [0.0, -0.5]  # furthest down
+    geo = {"frame_indices": [i * 3 for i in range(40)], "pose_track": track}
+    picked = pick_frames(geo, 5)
+    assert len(picked) == 5 and picked == sorted(picked)
+    assert {21, 90, 45, 66} <= set(picked)
+    assert pick_frames({"frame_indices": [0, 3], "pose_track": [None, None]}, 5) == [0, 3]
+    assert len(pick_frames({"frame_indices": list(range(40)), "pose_track": [None] * 40}, 5)) == 5

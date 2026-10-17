@@ -5,44 +5,61 @@ work is tracked in `tasks/todo.md`; corrections go in `tasks/lessons.md`.
 
 ## What this is
 
-Moment-of-action liveness for video calls. The agent asks the caller to turn their head slowly
-through four directions (up, down, left, right) in a randomised order, watches, and judges whether
-the head moved like a real 3D head: pose gates from YOLO keypoints, physical coherence from Cosmos.
-Pass or fail with evidence frames and written reasoning, every verdict logged and indexed so later
-verdicts can reason over earlier ones.
+Passive liveness for video calls. The caller is never asked to do anything. While the call runs,
+the agent records the caller's tile in back-to-back windows (8 s) and judges each from natural
+head movement: YOLO pose gates (one face, no jumps, enough movement to judge), YOLO picks the
+most-turned frames, Cosmos judges whether the head moves like a real 3D head. The call is decided
+FAIL on the first failed window, PASS after two clean windows, INCONCLUSIVE after six without
+either. The agent (W&B Inference) writes the decision note with similar past windows in context.
+Every window is logged (VastDB), archived (VSS), traced (Weave) and mirrored to W&B.
 
-**Pivot on 17 Oct (build day):** the three-challenge catalogue (object pass, head turn, fingers) is
-replaced by one challenge, the head circle, with the direction order shuffled per session so a
-recording cannot be replayed. Face-swap deepfakes break at profile (NYU GOTCHA, Euro S&P 2024),
-which is the artefact Cosmos is asked to find. Test set: our own head-circle clips as `live`, and
-`attack` clips made by face-swapping those clips, replaying them on a phone screen, or generating
-them with video models. Label every clip with how it was made.
+**Pivots on 17 Oct (build day):** first the three-challenge catalogue became one head-circle
+challenge with a shuffled order; then (midday) challenges were dropped altogether for passive
+watching (Karim). Face swaps break when the head turns (NYU GOTCHA, Euro S&P 2024), so the frames
+Cosmos sees are the most-turned moments YOLO measured. Test set: our own call clips as `live`, and
+`attack` clips made by face-swapping them, replaying them on a phone screen, or generating them
+with video models. Label every clip with how it was made.
 
 ## Architecture
 
 ```
 capture/    webcam or file -> Frame(image, index, t_seconds); sample_frames(); montage()
-challenge/  catalogue of challenges with pass criteria; issue() stamps one with a time window
-perception/ Detector: YOLO detect/track -> Detection(label, conf, box, track_id)
+perception/ Detector: YOLO pose -> Detection(+keypoints); pose.py: keypoints -> head pose, gates
 reason/     VisionReasoner: OpenAI-compatible VLM call with frames  <- the Cosmos seam
-agent/      loop.run_session(): challenge -> frames -> YOLO -> VLM -> combine -> SessionRecord
-            llm.AgentLLM: text model on W&B Inference (not yet used in the loop)
-index/      SessionIndex (add/search/all/where); SQLite now, VAST on the day  <- swappable
-eval/       wandb_log: start_run/log_session/finish, mirrors the index record; no-op without a key
-ui/         (empty) live feed + challenge + verdict page, Wed
-scripts/    smoke_vlm, smoke_yolo, smoke_pipeline; network checks live here, not in tests/
-config.py   settings dataclass read from .env; the only place os.environ is read
+            prompts.py: COHERENCE_VERSIONS (v1 naive, v2/v3 head-circle, v4 passive, v5 + think)
+agent/      loop.run_session(): one window: YOLO gates -> pick_frames -> Cosmos -> combine ->
+            Embed1 -> VSS archive -> verdict log; every stage recorded in signals["stack"]
+            loop.decide_call() / finish_call(): window verdicts -> call decision + agent note
+            llm.py: agent on W&B Inference writes the decision note, always with a fallback
+index/      SessionIndex (add/all/get/where/search/similar); sqlite | local | vast  <- swappable
+            vast.py: our table hackathon.liveness_sessions in the team VastDB bucket
+            embed.py: Cosmos Embed1 (256-dim) vectors; search falls back to keywords without it
+eval/       wandb_log (one run per process, a row per session), tracing (Weave ops, no-op without
+            a key), vss_archive (upload / search / ask / pull clips on the team VSS)
+ui/         FastAPI server + overlay: floating dot over the call, wakes on click or /api/trigger
+  web/      React + Vite + Tailwind source (React Bits components in src/reactbits/)
+  static/   build output of web/, committed so `make ui` needs no Node
+scripts/    check_stack (every sponsor component, OK/FAIL), eval_clips (prompt versions -> W&B),
+            smoke_*; network checks live here, not in tests/
+config.py   settings dataclass read from .env.team then .env; the only place os.environ is read
 ```
 
-One session (`agent/loop.py`): `issue()` -> `sample_frames()` -> `Detector.detect()` per frame ->
-`geometric_signal()` -> `VisionReasoner.describe(COHERENCE prompt)` -> `parse_verdict()` ->
-`combine()` -> `SessionRecord` -> `get_index().add()`.
+One window (`agent/loop.py`): `observe()` (YOLO pose, gates, pose track) -> `pick_frames()`
+(most-turned moments) -> `judge()` (Cosmos, prompt `PROMPT_VERSION`) -> `combine()` -> `embed()`
+-> `vss_archive.upload()` -> `get_index().add()`. A call (`ui/server.py` `/api/watch/*`, or
+`scripts/smoke_pipeline.py` on a recording cut into windows): windows until `decide_call()` is not
+WATCHING, then `finish_call()` (agent note, decision stored on the last window). Each step appends
+`{step, component, latency_s, detail}` to `signals["stack"]`; the session page renders it as "How
+this verdict was made". Windows, the decision and the agent calls are Weave ops.
 
 ## Conventions
 
 - Python 3.12 via uv. Run everything from the repo root: `uv run python -m scripts.<name>`.
 - Model ids, URLs and backends live in `.env`, never in code or prose. Read them via
   `config.settings`. Changing the vision model on the day is two lines in `.env`.
+- Every external service degrades instead of failing a session: no Embed1 -> keyword search, no
+  agent -> random order and Cosmos's text, no VSS -> no archive, no W&B key -> no logging or
+  tracing. Only the vision model and the index are required.
 - Two swappable seams, keep them clean: `reason.VisionReasoner` (`VLM_BASE_URL`, `VLM_MODEL`,
   `VLM_FRAME_FORMAT`) and `index.get_index()` (`INDEX_BACKEND`).
 - `ultralytics` is imported only inside `perception/`. `openai` only inside `reason/` and `agent/`.
@@ -58,11 +75,15 @@ One session (`agent/loop.py`): `issue()` -> `sample_frames()` -> `Detector.detec
 
 ```
 make setup            # uv sync (ffmpeg via brew separately)
+make check            # every sponsor component, one line each (ARGS="--write" adds a VastDB row)
+make eval             # labelled clips x prompt versions -> W&B (ARGS="--from-vss --index v2")
+make ui               # overlay at http://localhost:8765 (Chrome)
+make ui-build         # after editing ui/web: rebuild into ui/static and commit both
 make test             # offline tests
 make lint / make fmt
 make smoke-yolo  ARGS="--image data/samples/zidane.jpg"
 make smoke-vlm   ARGS="--video clip.mp4 --frames 6"
-make smoke-pipeline ARGS="--video clip.mp4 --challenge object_pass --label live --wandb"
+make smoke-pipeline ARGS="--video clip.mp4 --label live --wandb"   # replays it as a call
 ffmpeg -f avfoundation -framerate 30 -i "0" -t 10 data/clips/live_01.mp4   # webcam clip (device 0 is
                                    # the MacBook camera; list with -list_devices true -i ""; untested)
 ```
@@ -151,22 +172,40 @@ Steps 1 to 3 need nothing external. Step 4 needs Cosmos (team config or our pod)
 Untouched: `config.py` beyond new settings, `reason/vlm.py`, `index/sqlite.py`,
 `eval/wandb_log.py`, the docs.
 
+## Event stack facts (verified 17 Oct, team 10)
+
+- Run the pipeline **on the VM** (`ssh bc-karimbakkali15`, repo at `~/liveness-agent-hack`, uv in
+  `~/.local/bin`). The VastDB and VSS hosts only resolve there; from the laptop only the GPU
+  endpoints and W&B work. For the UI: `make ui` on the VM, then on the laptop
+  `ssh -f -N -L 8765:localhost:8765 bc-karimbakkali15` and open http://localhost:8765 (localhost
+  keeps the webcam allowed).
+- `.env.team` = `/config/team-10.config` + `WANDB_*` from the VM environment (team `vastdata`,
+  project `team-10`) + GPU URLs `http://166.19.38.112:800{1,2,3,4}`. `make check`: 11/11 on the VM.
+- Cosmos model id is `nvidia/cosmos3-nano-reasoner` (not `cosmos3-reason`); 5 images max.
+- VSS renames uploads to `<timestamp>_<id>.mp4`: labels must be **tags** (`live` / `attack`,
+  optional `udlr`). The team tags raw footage `liveness`; our judged sessions are tagged
+  `liveness-session`. `/videos/explore` returns `{chunks, total}`, `limit` max under 500.
+
 ## Known gaps, in priority order
 
-1. The VLM is sycophantic: on a cartoon clip it parroted the pass criteria back and gave
-   confidence 100. The COHERENCE prompt must demand concrete evidence and be tested against
-   attack clips on Sunday before any scoring work.
-2. `combine()` is a placeholder (VLM decides, YOLO can veto). Karim owns scoring.
-3. Live webcam path: `run_session` takes a file; a buffered `iter_frames()` window is needed.
-4. `AgentLLM` is unused; challenge choice is random. The agent should pick challenges and write
-   the verdict text, with the index's similar past sessions in context.
-5. `SqliteIndex.search` is keyword overlap; swap in embeddings (NVIDIA hosted or local).
-6. `ui/` is empty.
+1. **No attack clips yet.** Every clip so far is a real person, and all pass (window scores
+   0.9-0.95). Whether Cosmos catches a face swap or a screen replay is untested. Record and tag
+   attack clips, then `make eval ARGS="--from-vss"` (v1 vs v4 vs v5 in W&B).
+2. The overlay has not been tried on a real call (Meet between two laptops); the window loop runs
+   in the setup tab, whose timers Chrome throttles when hidden (recording timers use the PiP
+   window's, as before).
+3. Scoring constants (`agent/loop.py`: threshold 0.5, jump penalty 0.5, motion 0.5 yaw / 0.4
+   pitch, 2 passes, 6 windows) are set from three live clips; tune on labelled ones.
+4. A caller who sits still for six windows gets INCONCLUSIVE; there is no fallback yet (the old
+   head-circle challenge would be the natural one, kept in git history).
 
 ## Demo script (under four minutes)
 
 1. Problem in one sentence an ops or finance person would say (30 s).
-2. Live feed: ten seconds, then three on-stage challenges with verdicts (2 min).
+2. Live call: the agent watches without asking anything and decides; then an attack clip fails
+   (2 min). Name each sponsor in one sentence as it acts (YOLO gates and frame choice, Cosmos
+   reasoning with cited frames, VastDB log and VSS search, W&B agent note, eval and Weave trace).
+   Plan: "Sponsor plan" in `HACKATHON_CONTEXT.md`.
 3. Architecture slide naming every stack component: YOLO, Cosmos, semantic search, W&B LLM and
    logging, VAST AI OS, CoreWeave (30 s).
 4. Who buys it and why: finance and treasury first, then bank fraud teams (30 s).

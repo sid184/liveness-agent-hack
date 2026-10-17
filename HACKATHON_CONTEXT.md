@@ -157,6 +157,45 @@ Roles: one on video pipeline (capture -> YOLO -> Cosmos -> index), one on agent 
     bottleneck fallback starts from indexed data.
   - **Decision:** Cosmos3-Reason on their endpoint is the default vision model (`.env`). Our RunPod
     pod is the backup and stays stopped. Local setup: `scp bc-<user>:/config/*.config .env.team`.
+- **Pivot to passive (17 Oct, midday, Karim):** no challenge, no instruction to the caller. The
+  agent watches the call in 8 s windows and decides (FAIL on a failed window, PASS after two clean
+  ones). Verified on the VM with three team clips through every component (`make check` 11/11).
+  Needs attack clips next.
+- **Sponsor integrations built (17 Oct, midday), untested against the event stack:** VastDB
+  verdict log (`index/vast.py`, default `INDEX_BACKEND=vast`), Cosmos Embed1 search
+  (`index/embed.py`), VSS archive with tags (`eval/vss_archive.py`), Weave tracing
+  (`eval/tracing.py`), agent on W&B Inference choosing the order and writing the note
+  (`agent/llm.py`), prompt eval across versions (`make eval`), overlay UI ported with a "How this
+  verdict was made" card. **First thing:** `.env.team` in place, then `make check`.
+- **Sponsor plan (decided 17 Oct, morning).** Judges are 2 VAST, 1 NVIDIA, 1 W&B, so VAST
+  carries half the votes and is today our thinnest integration. Test for every component: its
+  judge sees it do a job only it can do, on screen, and we can say what breaks without it.
+  - **NVIDIA Cosmos3-Reason:** the physical-coherence verdict. Frame it as rigid 3D body under
+    rotation (ears and jaw reveal and occlude consistently, texture stays attached at profile),
+    never "face analysis". Show its reasoning with the cited frames beside it. Second NVIDIA model:
+    Cosmos Embed1 for semantic search over past sessions.
+  - **W&B:** (1) an eval: every labelled clip under each COHERENCE prompt version, logged as a W&B
+    table, live vs attack scores per version until they separate ("we measured our model being
+    fooled and fixed it"); (2) Weave tracing, one trace per session (YOLO -> Cosmos -> agent);
+    (3) `AgentLLM` on W&B Inference picks the direction order and writes the verdict paragraph.
+    Use the team key and project from the VM so their judge can open the runs.
+  - **VAST:** (1) VastDB holds the verdict log (`INDEX_BACKEND=vast`); (2) every clip is archived
+    to VSS with verdict and label tags, so their search UI answers "every check that failed at
+    profile"; (3) the agent queries VastDB for similar past sessions before writing a verdict
+    ("matches 2 earlier attacks this week"). Pitch line: every check becomes a searchable evidence
+    record instead of video sitting unwatched.
+  - **CoreWeave:** Cosmos3, Embed1 and YOLO11s are the organisers' endpoints on CoreWeave GPUs;
+    say so and show their latency.
+  - **YOLO:** local `yolo11n-pose` keypoints for the hard gates (one face, every direction, in order).
+  - **Legibility:** the session review page (not the overlay) labels each step with its component
+    and latency, e.g. "Physical coherence · Cosmos3-Reason on CoreWeave · 4.1 s", "Logged to
+    VastDB · archived to VSS", "Agent · W&B Inference · traced in Weave". In the live demo, name
+    each sponsor in one sentence at the moment it acts, not only on the architecture slide.
+  - **Order by votes per hour:** VastDB log, then VSS archive and search demo (VM seat); W&B eval
+    table (same work as the prompt fix); Cosmos cited reasoning in the UI; Weave and the agent on
+    W&B Inference; Embed1 search and the CoreWeave wording.
+  - Note: `ui/` is empty here; the overlay built in the prep repo (`sid184/liveness-agent`,
+    branch `dev`) needs porting.
 - **Ask the organisers first:** is a Cosmos endpoint provided today? Is VAST available, and how?
   Are pre-written code and own footage allowed?
 - **1 pm checkpoint** stands: if challenge -> clip -> verdict isn't working end to end on real

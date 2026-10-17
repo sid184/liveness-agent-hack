@@ -22,6 +22,22 @@ Critical path: real footage through the pipeline, then the live demo.
       W&B key arrives, point `AGENT_BASE_URL` at NVIDIA hosted (same OpenAI client).
 - [ ] Pitch: `docs/USE_CASES.md` pitch lines, architecture slide from `docs/target_workflow.mmd`
 
+### Sponsor visibility (plan in `HACKATHON_CONTEXT.md`, "Sponsor plan")
+
+- [x] **W&B eval** `scripts/eval_clips.py`: every clip in `data/clips/`, one W&B run per prompt
+      version (`config.prompt_version`), a `wandb.Table` of clip, label, score, verdict, cited
+      frames, reasoning; summary metrics: mean score by label, separation, accuracy at threshold.
+      Keep each prompt version in `reason/prompts.py` so runs are comparable.
+- [x] **Weave tracing**: `weave.init` with the team project; `@weave.op` on `Detector.detect`,
+      `VisionReasoner.describe`, `AgentLLM.chat`, `run_session`. No-op without a key.
+- [x] **Agent on W&B Inference**: `AgentLLM` picks the direction order and writes the verdict
+      paragraph, with `get_index().search()` results (similar past sessions) in the prompt.
+- [x] **Cosmos visible**: verdict view shows Cosmos's reasoning with its cited frames beside it.
+- [x] **Session page stack labels**: each step tagged with component and latency (YOLO11 pose,
+      Cosmos3-Reason on CoreWeave, VastDB, VSS, W&B Inference + Weave). Review page only.
+- [x] **Port the overlay UI** from the prep repo (`sid184/liveness-agent`, branch `dev`, `ui/`).
+- [ ] **Demo script**: one sentence per sponsor at the moment it acts; rehearse it.
+
 ## Track B: whoever has a VM seat (`bc-<username>`, `/config/<team>.config`)
 
 Everything that needs the organisers' credentials. On the VM the config is already in the
@@ -33,21 +49,37 @@ environment, so `config.settings` picks it up with no `.env.team`.
       `make smoke-vlm ARGS="--video <any clip> --frame-format video"` against Cosmos3-Reason.
       Report latency and whether `video` or `images` format works better. (`VLM_*` in `.env`
       already point at `COSMOS3_REASON_URL`; set `VLM_API_KEY=$GPU_BEARER_TOKEN`.)
-- [ ] `index/vast.py`: `VastIndex(SessionIndex)` on the `vastdb` SDK (`pip install vastdb pyarrow`),
+- [x] `index/vast.py`: `VastIndex(SessionIndex)` on the `vastdb` SDK (`pip install vastdb pyarrow`),
       data VIP = `S3_ENDPOINT`, bucket `VASTDB_BUCKET`, new schema `hackathon`, table
       `liveness_sessions`, columns = `SessionRecord` fields (`evidence`/`signals` as JSON text).
       `add`, `all`, `where`, `search`. Wire `INDEX_BACKEND=vast` in `index/__init__.py`.
       Never touch `vss-collection`. Prove it with the organisers' `vastdb-read/query.py`.
-- [ ] `index/embed.py`: Cosmos Embed1 client (`POST $COSMOS_EMBED1_URL/v1/embeddings`,
+- [x] `index/embed.py`: Cosmos Embed1 client (`POST $COSMOS_EMBED1_URL/v1/embeddings`,
       `request_type: query`, 256-dim). Store the vector per session; `search` = cosine over them.
       Works for both `SqliteIndex` and `VastIndex`.
-- [ ] `eval/vss_archive.py`: after each session, upload the clip to the VSS backend
+- [x] `eval/vss_archive.py`: after each session, upload the clip to the VSS backend
       (`POST $INGRESS_URL/api/v1/videos/upload`, JWT from `/api/v1/auth/login`, tags
       `session_id`, `verdict`, `label`, `camera_id=liveness`). Then the organisers' search UI can
       answer "every check where the phone never crossed the face". Demo moment.
+- [ ] **VAST demo moments (two of four judges; do these before the optional items):** verdict
+      log in VastDB as the default backend on the day; VSS archive with tags so a search like
+      "every check that failed at profile" returns our attack clips in the organisers' UI; the
+      agent's "similar past sessions" read comes from VastDB. Rehearse the search query.
 - [ ] Optional: `perception/remote.py`, their YOLO11s (`POST $YOLO_URL/v1/infer`, `video_base64`),
       returning the same `Detection` list. Only if local YOLO is a problem.
 - [ ] Optional, late: deploy the web UI with the organisers' `deploy-app-no-registry` skill.
+
+### Built 17 Oct (written from the organisers' docs; verify with `make check` on `.env.team`)
+
+- [x] `scripts/check_stack.py` (`make check`): one OK/FAIL line per sponsor component
+- [x] `agent/loop.py`: stages traced, timed and labelled in `signals["stack"]`; frames saved
+- [x] Run `make check` with the team config; fix whatever is red (11/11 on the VM)
+- [x] Passive watch (no challenge): windows -> decision, UI and API, verified on team clips
+- [ ] Record and upload **attack** clips tagged `attack` (face swap, phone replay, generated);
+      live ones tagged `live`
+- [ ] `make eval ARGS="--from-vss"` on the team's uploaded clips; read the W&B comparison
+- [ ] `make eval ARGS="--index v4 --archive"` once a version separates: fills VastDB and VSS
+- [ ] Rehearse the VSS search ("face texture slides at profile") in the organisers' UI
 
 ## Integration points
 

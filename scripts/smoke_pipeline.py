@@ -1,32 +1,36 @@
-"""One clip through the whole pipeline: challenge -> YOLO -> VLM -> verdict -> index.
+"""A recorded clip through the whole pipeline, as a live call would send it.
+
+The clip is cut into windows of WINDOW_S seconds; each window is judged in order (YOLO -> Cosmos
+-> verdict -> VSS -> index) until the call is decided, then the agent writes the decision note.
 
 uv run python -m scripts.smoke_pipeline                         # synthetic clip
-uv run python -m scripts.smoke_pipeline --video data/clips/live_01.mp4 --label live \
-    --order up,down,left,right
+uv run python -m scripts.smoke_pipeline --video data/clips/live_01.mp4 --label live --wandb
+uv run python -m scripts.smoke_pipeline --video clip.mp4 --window 4   # shorter windows
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import uuid
 
 import scripts._paths  # noqa: F401
-from agent.loop import run_session
-from capture.frames import synthetic_test_clip
-from challenge import issue
+from agent.loop import WINDOW_S, decide_call, finish_call, run_session
+from capture.frames import split_clip, synthetic_test_clip
 from config import settings
-from eval import wandb_log
+from eval import tracing, wandb_log
+from reason.prompts import COHERENCE_VERSIONS
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--video")
     ap.add_argument("--frames", type=int, default=12)
-    ap.add_argument(
-        "--order", help="directions the person actually performed, e.g. up,down,left,right"
-    )
+    ap.add_argument("--window", type=float, default=WINDOW_S, help="seconds per window")
     ap.add_argument("--label", choices=["live", "attack"])
     ap.add_argument("--wandb", action="store_true", help="log this run to W&B")
+    ap.add_argument("--prompt", choices=list(COHERENCE_VERSIONS), help="judge prompt version")
+    ap.add_argument("--archive", action="store_true", help="upload each window to the team VSS")
     args = ap.parse_args()
 
     video = args.video
@@ -34,29 +38,54 @@ def main() -> None:
         video = synthetic_test_clip(settings.data_dir / "samples" / "synthetic_pass.mp4")
         print(f"no clip given; synthetic clip at {video}")
 
-    params = {"order": tuple(args.order.split(","))} if args.order else None
-    ch = issue("head_circle", params=params)
-    print(f"challenge: [{ch.id}] {ch.instruction}")
+    tracing.init()
+    call_id = uuid.uuid4().hex[:10]
+    folder = settings.data_dir / "sessions" / f"smoke_{call_id}"
+    parts = split_clip(video, args.window, folder / "windows")
+    print(f"call {call_id}: {len(parts)} windows of {args.window:g} s from {video}")
     if args.wandb:
-        wandb_log.start_run(
-            name=f"smoke-{ch.id}", config={"video": str(video), "frames": args.frames}
+        wandb_log.start_run(name=f"smoke-{call_id}", config={"video": str(video)})
+
+    windows, decision = [], "WATCHING"
+    for i, part in enumerate(parts, 1):
+        rec = run_session(
+            part,
+            n_frames=args.frames,
+            label=args.label,
+            prompt_version=args.prompt,
+            archive=args.archive,
+            evidence_dir=folder / f"window_{i:02d}",
+            call_id=call_id,
+            window_no=i,
         )
-
-    rec = run_session(video, ch, n_frames=args.frames, label=args.label)
-
-    print(f"verdict: {rec.verdict}  score={rec.score}")
-    print(f"vlm ({rec.signals['vlm_model']}, {rec.signals['vlm_latency_s']}s):")
-    print(rec.signals["vlm_raw"])
-    print(
-        "geometric:",
-        json.dumps(rec.signals["geometric"]["gates"]),
-        "geo =",
-        rec.signals["geometric"]["geo"],
-    )
-    print("sequence: ", " ".join(rec.signals["geometric"]["sequence"]))
-    print(f"session {rec.session_id} written to index")
+        windows.append(rec)
+        geo = rec.signals["geometric"]
+        vlm = rec.signals["vlm"]
+        print(
+            f"\nwindow {i}: {rec.verdict} {rec.score}  gates {json.dumps(geo['gates'])}  "
+            f"yaw {geo['yaw_range']} pitch {geo['pitch_range']}"
+        )
+        print(f"  cosmos ({rec.signals['vlm_model']}, {rec.signals['vlm_latency_s']}s): "
+              f"{vlm.get('verdict')} {vlm.get('confidence')} | {vlm.get('observed')}")  # fmt: skip
+        if vlm.get("artifacts"):
+            print(f"  artifacts: {vlm['artifacts']}")
+        decision = decide_call([w.verdict for w in windows])
+        if decision != "WATCHING":
+            break
+    if decision == "WATCHING":
+        decision = "INCONCLUSIVE"  # the recording ran out before the call was decided
+        print(f"\nrecording ended after {len(windows)} windows without a decision")
+    rec = finish_call(windows, decision)
     if args.wandb:
-        wandb_log.log_session(rec)
+        for w in windows:
+            wandb_log.log_session(w)
+
+    print(f"\nDECISION: {decision}\nnote: {rec.reasoning}\n\nstack (last window):")
+    for st in rec.signals.get("stack", []):
+        lat = "" if st.get("latency_s") is None else f"{st['latency_s']:.1f}s"
+        print(f"  {st['step']:<20} {st['component']:<50} {lat:>6}  {st.get('detail') or ''}")
+    print(f"\nsession {rec.session_id} written to {settings.index_backend}")
+    if args.wandb:
         wandb_log.finish()
 
 

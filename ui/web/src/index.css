@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #07080b;
+  --color-panel: #0e1016;
+  --color-line: #1f232d;
+  --color-ink: #eef0f4;
+  --color-muted: #8b919c;
+  --color-accent: #5eead4;
+  --color-ok: #3ecf8e;
+  --color-bad: #ff4d5e;
+  --color-warn: #f0b429;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-pop: pop 420ms cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  --animate-ping-slow: ping-slow 2.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+  --animate-blink: blink 1s steps(2, start) infinite;
+}
+
+/* Inline: these read variables set on the element itself, which a :root token cannot see. */
+@theme inline {
+  --animate-glitch-after: glitch var(--after-duration) infinite linear alternate-reverse;
+  --animate-glitch-before: glitch var(--before-duration) infinite linear alternate-reverse;
+  --animate-fill: fill var(--fill-ms) linear both;
+}
+
+@keyframes glitch {
+  0% { clip-path: inset(20% 0 50% 0); }
+  10% { clip-path: inset(15% 0 55% 0); }
+  20% { clip-path: inset(30% 0 40% 0); }
+  30% { clip-path: inset(10% 0 60% 0); }
+  40% { clip-path: inset(25% 0 35% 0); }
+  50% { clip-path: inset(20% 0 50% 0); }
+  60% { clip-path: inset(15% 0 55% 0); }
+  70% { clip-path: inset(30% 0 40% 0); }
+  80% { clip-path: inset(20% 0 50% 0); }
+  90% { clip-path: inset(25% 0 35% 0); }
+  100% { clip-path: inset(40% 0 20% 0); }
+}
+
+/* Overlay motion is CSS only: the floating window keeps animating while the setup tab, whose
+   requestAnimationFrame and timers the browser throttles, sits hidden behind the call. */
+@keyframes pop { from { transform: scale(0.6); opacity: 0; } }
+@keyframes ping-slow { 75%, 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes fill { from { width: 0; } to { width: 100%; } }
+@keyframes blink { to { visibility: hidden; } }
+
+html, body { background: var(--color-bg); color: var(--color-ink); }
+body {
+  margin: 0;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --glitch-bg: var(--color-bg);
+}
