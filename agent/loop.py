@@ -281,6 +281,12 @@ def observe(video_path: str, detector: Detector, objects: Detector | None = None
     geo["frame_indices"] = [f.index for f in geo_frames]
     geo["crop"] = crop
     geo["pose_track"] = [None if c.pose is None else [c.pose.yaw, c.pose.pitch] for c in cues]
+    # Peak sideways excursion from the resting yaw (Sid, 17 Oct): generated fakes max 0.32, real
+    # turns min 0.55 on our clips. Recorded for eval; not part of the verdict.
+    yaws = [t[0] for t in geo["pose_track"] if t]
+    geo["turn_peak"] = (
+        round(float(max(abs(y - float(np.median(yaws))) for y in yaws)), 3) if yaws else 0.0
+    )
     return {"geo": geo, "poses": [c.pose for c in cues]}
 
 

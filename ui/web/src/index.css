@@ -45,6 +45,12 @@
 @keyframes fill { from { width: 0; } to { width: 100%; } }
 @keyframes blink { to { visibility: hidden; } }
 
+/* LiveGuard mark: the ring sweeps and the dot breathes while a check runs. */
+@keyframes lg-sweep { to { transform: rotate(360deg); } }
+@keyframes lg-pulse { 50% { opacity: 0.35; transform: scale(0.7); } }
+.lg-sweep { animation: lg-sweep 2.4s linear infinite; transform-origin: 50px 50px; }
+.lg-pulse { animation: lg-pulse 1.6s ease-in-out infinite; transform-origin: 50px 50px; }
+
 html, body { background: var(--color-bg); color: var(--color-ink); }
 body {
   margin: 0;

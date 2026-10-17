@@ -20,6 +20,7 @@ import FaultyTerminal from "./reactbits/FaultyTerminal";
 import StarBorder from "./reactbits/StarBorder";
 import { SessionList } from "./SessionList";
 import { Panel, PanelTitle } from "./Panel";
+import { GMark, Wordmark } from "./Mark";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { ComputerVideoCallIcon, UserIcon, WebcamIcon } from "@hugeicons/core-free-icons";
 
@@ -281,7 +282,14 @@ function App() {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(7,8,11,.55),rgba(7,8,11,.95)_70%)]" />
       </div>
 
-      <main className="relative mx-auto max-w-3xl px-4 py-16 sm:py-24">
+      <main className="relative mx-auto max-w-3xl px-4 py-12 sm:py-20">
+        <div className="mb-8 flex flex-wrap items-center gap-3">
+          <GMark size={46} active={active} className="text-accent drop-shadow-[0_0_12px_rgba(94,234,212,.45)]" />
+          <Wordmark className="text-3xl" />
+          <span className="rounded-full border border-accent/30 bg-accent/5 px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-accent/90">
+            moment-of-action liveness
+          </span>
+        </div>
         <h1 className="m-0 font-mono text-4xl font-extrabold leading-none sm:text-6xl">
           <DecryptedText
             text="Is this caller real?"
@@ -292,9 +300,9 @@ function App() {
           />
         </h1>
         <p className="mt-4 mb-10 max-w-xl text-base text-muted">
-          Set this up once per call, then forget about it. The agent watches the caller as the
-          call goes on, never asks them to do anything, and decides on its own. A small dot
-          floats over your call; only a failed check stays on screen.
+          <span className="text-ink">Watches the call. Never asks the caller to do anything.</span>{" "}
+          Blocks the payment if it can't verify a live person. A small dot floats over your call;
+          only a failed check stays on screen.
         </p>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -327,8 +335,9 @@ function App() {
                 className={`size-full object-cover ${source ? "" : "invisible"}`}
               />
               {!source && (
-                <div className="absolute inset-0 grid place-items-center text-center font-mono text-[11px] uppercase tracking-widest text-muted/70">
-                  No source yet
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center font-mono text-[11px] uppercase tracking-widest text-muted/80">
+                  <GMark size={56} active className="text-accent/70" />
+                  Waiting for a call
                 </div>
               )}
             </div>

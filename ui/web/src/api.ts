@@ -31,6 +31,7 @@ export interface Summary {
   created_at: number;
   label: string | null;
   windows?: number | null; // a decided call: how many windows it took
+  window_verdicts?: Verdict[] | null; // each window of a decided call, in order
   assurance?: Assurance | null;
   window_no?: number | null;
 }
