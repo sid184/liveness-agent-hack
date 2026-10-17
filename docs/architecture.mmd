@@ -1,0 +1,49 @@
+%%{init: {"theme": "neutral", "themeVariables": {"fontFamily": "IBM Plex Mono, Menlo, monospace", "fontSize": "14px"}}}%%
+%% liveness-agent: high-level architecture as it exists on Sun 11 Oct 2026. Paste the whole file into https://mermaid.live
+flowchart TB
+
+subgraph IN["INPUT"]
+  CLIP["<b>RECORDED CLIP</b> (mp4 on disk)<br/>today: a cartoon test clip · real clips recorded: 0"]:::box
+  CAM["<b>WEBCAM</b><br/>streaming code exists, nothing uses it"]:::ghost
+end
+
+subgraph RUN["ONE SESSION  (agent/loop.py, started by make smoke-pipeline)"]
+  STEPS["<b>one clip's journey</b><br/>① issue a challenge: object pass · head turn · N fingers (random pick)<br/>② sample 6-8 evenly spaced frames from the clip<br/>③ YOLO on each frame (runs on the laptop) → person + object boxes → geometric signal, object pass only<br/>④ vision model judges the frames → OBSERVED · COHERENT · VERDICT · CONFIDENCE<br/>⑤ combine: the vision model decides, YOLO can only veto → PASS or FAIL + score<br/>⑥ write the session record to the verdict log, and to W#38;B if asked"]:::box
+end
+
+subgraph EXT["MODELS AND SERVICES"]
+  NV["<b>NVIDIA HOSTED API</b><br/>Llama 3.2 11B Vision · the fallback when the pod is off<br/>free · one image per call, so frames are tiled · 3-7 s"]:::box
+  RP["<b>COSMOS POD</b> (RunPod A40, ours)<br/>Cosmos-Reason2-8B on vLLM · THE DEFAULT · real video reasoning · 3-10 s<br/>stopped between sessions · 4 min to start · 59 c/hr"]:::box
+  WB["<b>WEIGHTS #38; BIASES</b><br/>mirror of every session record, for us to compare runs<br/>key must move to a personal account<br/>text LLM for the agent · built, not used"]:::box
+end
+
+subgraph LOG["VERDICT LOG"]
+  IDX[("<b>SQLITE DATABASE</b> (source of truth)<br/>data/index/sessions.db, one row per session<br/>challenge · verdict · score · reasoning · label · raw YOLO and VLM output<br/>filter and keyword search exist · nothing reads it back yet")]:::box
+  VAST["<b>VAST AI OS</b><br/>replaces this file on the day"]:::ghost
+end
+
+subgraph NEXT["NOT BUILT YET"]
+  UI["<b>UI</b><br/>live feed · challenge · verdict"]:::ghost
+  AG["<b>AGENT</b><br/>LLM picks the challenge, writes the verdict,<br/>reads similar past sessions first"]:::ghost
+  FH["<b>FACE + HAND DETECTION</b><br/>stock YOLO has neither"]:::ghost
+  EV["<b>EVIDENCE CLIPS</b><br/>the record keeps only the file path"]:::ghost
+end
+
+CLIP == "clip path" ==> STEPS
+CAM -. "future: live window" .-> STEPS
+STEPS == "④ frames + prompt" ==> RP
+STEPS -. "④ fallback: comment out 3 lines in .env" .-> NV
+STEPS -- "⑥ same record, mirrored" --> WB
+STEPS == "⑥ session record" ==> IDX
+IDX -. "swap on the day" .-> VAST
+IDX -. "future: similar past sessions" .-> AG
+STEPS -. "future: verdict on screen" .-> UI
+
+classDef box fill:#ffffff,stroke:#555555,color:#222222
+classDef ghost fill:#fafafa,stroke:#999999,color:#666666,stroke-dasharray: 5 4
+
+style IN fill:#f3f3f3,stroke:#8a8a8a,color:#444444
+style RUN fill:#fdecec,stroke:#c0504d,color:#7a2e2c
+style EXT fill:#eaf1fb,stroke:#5b7fb5,color:#2b4a7a
+style LOG fill:#fbf6e4,stroke:#c9a227,color:#6b5410
+style NEXT fill:#f1f1f1,stroke:#9a9a9a,color:#555555,stroke-dasharray: 6 4

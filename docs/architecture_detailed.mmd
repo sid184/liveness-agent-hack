@@ -1,0 +1,132 @@
+%% liveness-agent: architecture as it exists on Sun 11 Oct 2026. Paste the whole file into https://mermaid.live
+flowchart TB
+
+%% ================= Legend =================
+subgraph LEGEND["Legend"]
+  direction LR
+  L1["working, verified against live services"]:::done
+  L2["placeholder: runs, but naive"]:::stub
+  L3["implemented, not wired into the pipeline"]:::idle
+  L4["empty or not started"]:::missing
+  L5["external service"]:::ext
+  L6["file or data on disk"]:::data
+end
+
+%% ================= Entry points =================
+subgraph ENTRY["Entry points: make targets and uv run python -m scripts.x"]
+  MK["Makefile<br/>setup · smoke-vlm · smoke-yolo · smoke-pipeline · lint · fmt · test"]:::done
+  SP["scripts/smoke_pipeline.py<br/>args: video, challenge, frames (6), label live or attack, wandb"]:::done
+  SV["scripts/smoke_vlm.py<br/>args: image or video + frames (6), prompt, model, frame-format<br/>prints the reasoning trace and the answer"]:::done
+  SY["scripts/smoke_yolo.py<br/>args: image, conf (0.25)<br/>writes annotated data/out/smoke_yolo.jpg"]:::done
+  TST["tests/test_offline.py<br/>6 offline tests, no network, 0.6 s"]:::done
+end
+
+%% ================= Config =================
+ENV[".env  gitignored, every variable documented in .env.example<br/>NVIDIA_API_KEY · WANDB_API_KEY · HF_TOKEN · RUNPOD_API_KEY<br/>optional overrides: VLM_BASE_URL VLM_MODEL VLM_FRAME_FORMAT<br/>AGENT_BASE_URL AGENT_MODEL WANDB_PROJECT WANDB_ENTITY YOLO_MODEL INDEX_BACKEND"]:::data
+CFG["config.py  settings: frozen dataclass loaded once<br/>the only place os.environ is read<br/>defaults: NVIDIA hosted Llama 3.2 11B Vision, montage,<br/>W#38;B Inference Llama 3.3 70B, yolo11n.pt, INDEX_BACKEND=local"]:::done
+ENV --> CFG
+
+%% ================= One session =================
+subgraph PIPE["agent/loop.py  run_session(video_path, challenge, n_frames, label): one recorded clip in, one SessionRecord out"]
+  CAT["challenge/catalog.py  CHALLENGES<br/>object_pass 6 s, objects: cell phone, cup, bottle, remote, book<br/>head_turn 6 s<br/>fingers 5 s, n in 2, 3, 4"]:::done
+  ISSUE["challenge.issue(challenge_id, rng)<br/>random pick unless named, fills params,<br/>stamps issued_at and deadline"]:::done
+  SAMP["capture.sample_frames(path, n)<br/>n evenly spaced frames from a video FILE<br/>Frame(image BGR, index, t_seconds)"]:::done
+  DET["perception.Detector.detect(image, conf 0.25) per frame<br/>ultralytics YOLO, COCO labels only<br/>Detection(label, conf, box, track_id)"]:::done
+  GEO["geometric_signal(per_frame, challenge)<br/>counts person frames and object frames,<br/>object box inside person box by over half<br/>geometric_pass exists for object_pass only"]:::stub
+  PROMPT["reason/prompts.COHERENCE<br/>instruction + criteria + n + duration<br/>asks for OBSERVED, COHERENT, VERDICT, CONFIDENCE<br/>known sycophantic on the cartoon clip"]:::stub
+  VLM["reason.VisionReasoner.describe(images, prompt)<br/>OpenAI chat completions, 90 s timeout, 1 retry<br/>frame_format: images · montage · video_frames<br/>JPEG resized to 768 px (montage 1024 px), base64 inline<br/>text = content, else reasoning_content"]:::done
+  PARSE["parse_verdict(text)<br/>regex over the four fields<br/>confidence 0-100 to 0..1, PASS or FAIL else None"]:::done
+  COMB["combine(geo, vlm)<br/>VLM decides, YOLO can only veto<br/>score = conf if PASS else 1 - conf<br/>geometric_pass False halves it<br/>PASS at 0.5 or more, ERROR if no verdict"]:::stub
+  REC["index.SessionRecord<br/>challenge_id, instruction, verdict, score, reasoning,<br/>evidence = input video path only, signals: geo, vlm fields, raw text,<br/>model, latency, every detection, label, session_id, created_at"]:::done
+  ADD["index.get_index().add(record)<br/>INDEX_BACKEND=local"]:::done
+
+  CAT --> ISSUE
+  ISSUE -- "instruction, criteria" --> PROMPT
+  ISSUE -- "challenge.objects" --> GEO
+  SAMP -- "frames" --> DET
+  SAMP -- "frames, duration" --> VLM
+  DET --> GEO
+  PROMPT --> VLM
+  VLM --> PARSE
+  GEO --> COMB
+  PARSE --> COMB
+  COMB --> REC
+  GEO -. "raw signals" .-> REC
+  REC --> ADD
+end
+
+%% ================= Index =================
+subgraph IDX["index/  the verdict log, swappable seam"]
+  LOC["index/local.py  LocalIndex<br/>append JSONL, all(), search(query, k=5)<br/>search = keyword overlap, newest first"]:::stub
+  JSONL["data/index/sessions.jsonl"]:::data
+  VAST["INDEX_BACKEND=vast<br/>raises NotImplementedError, wired on the day"]:::missing
+  SEARCH["LocalIndex.search()<br/>exists, but nothing in the pipeline calls it:<br/>the agent never reads past sessions"]:::idle
+  LOC --> JSONL
+  LOC --- SEARCH
+end
+ADD --> LOC
+
+%% ================= Eval =================
+subgraph EVAL["eval/"]
+  WB["eval/wandb_log.py  start_run, log, finish<br/>no-op without WANDB_API_KEY"]:::done
+end
+
+%% ================= External =================
+subgraph EXT["External services"]
+  NV["NVIDIA hosted API  integrate.api.nvidia.com<br/>meta/llama-3.2-11b-vision-instruct = DEFAULT VLM<br/>one image per call, hence montage mode, 3-7 s<br/>nvidia/cosmos-reason2-8b is listed but returns 404: disabled by NVIDIA"]:::ext
+  RP["RunPod pod cosmos, A40 48 GB, currently STOPPED<br/>vLLM 0.31 serving nvidia/Cosmos-Reason2-8B via scripts/serve_cosmos.sh<br/>proxy: pod-id-8000.proxy.runpod.net/v1, use frame_format=images<br/>3 s per 8 frames plain, 10 s with the think prompt<br/>network volume keeps weights and venv, restart about 4 min"]:::ext
+  HF["Hugging Face Hub<br/>gated Cosmos-Reason2-8B weights, pulled with HF_TOKEN"]:::ext
+  WBS["Weights #38; Biases logging<br/>current key is the employer entity: REPLACE"]:::ext
+  WBI["W#38;B Inference  api.inference.wandb.ai<br/>text models only, Llama 3.3 70B"]:::ext
+  YW["yolo11n.pt  COCO weights, auto-downloaded, gitignored<br/>inference runs locally on the laptop"]:::data
+end
+
+%% ================= Built but not wired =================
+subgraph IDLE["Built or declared, but not in the pipeline yet"]
+  ITER["capture.iter_frames(source, max_frames)<br/>streams from webcam index 0 or a file<br/>implemented, unused: the live path does not exist"]:::idle
+  TRACK["perception.Detector.track()<br/>persistent track ids across frames<br/>implemented, unused"]:::idle
+  ANNOT["Detector.annotate()<br/>draws boxes, used only by smoke_yolo"]:::idle
+  ALLM["agent/llm.py  AgentLLM.chat(messages)<br/>implemented, called by nothing:<br/>challenge choice is random, verdict text comes from the VLM"]:::idle
+  THINK["prompts.DESCRIBE, DESCRIBE_SEQUENCE, COSMOS_THINK_SUFFIX<br/>DESCRIBE* used only by smoke_vlm<br/>think suffix is never appended in code"]:::idle
+  DEAD["IssuedChallenge.deadline<br/>stamped, never checked: no time window enforcement"]:::idle
+  UI["ui/  one docstring, nothing else<br/>live feed + challenge + verdict page"]:::missing
+  FACE["face and hand detection<br/>not in COCO, model undecided"]:::missing
+  EVID["evidence clips<br/>the record keeps only the input video path"]:::missing
+  SCORE["real scoring and calibration<br/>combine() is the placeholder"]:::missing
+end
+
+%% ================= Test data =================
+subgraph SYN["Test data: no real footage yet"]
+  SYNI["capture.synthetic_test_image, synthetic_test_clip<br/>cartoon face, dark phone sweeps left to right, 4 s at 15 fps"]:::done
+  SAMPLES["data/samples/synthetic.jpg · synthetic_pass.mp4<br/>data/out/smoke_yolo.jpg<br/>real clips recorded: 0"]:::data
+  SYNI --> SAMPLES
+end
+
+%% ================= Cross edges =================
+SP -- "no video given: synthetic clip" --> SYNI
+SP -- "issue() then run_session()" --> ISSUE
+SP --> SAMP
+SP -- "with wandb flag: verdict, score, geometric" --> WB
+SV -- "DESCRIBE or DESCRIBE_SEQUENCE" --> VLM
+SY --> DET
+TST -. "covers montage, issue, parse_verdict, geometric_signal, combine, LocalIndex" .-> PIPE
+
+VLM == "default" ==> NV
+VLM -. "two lines in .env switch it" .-> RP
+RP -. "first start only" .-> HF
+DET --> YW
+WB --> WBS
+ALLM -.-> WBI
+
+CFG -.-> VLM
+CFG -.-> DET
+CFG -.-> LOC
+CFG -.-> WB
+CFG -.-> ALLM
+
+classDef done fill:#dcfce7,stroke:#15803d,color:#14532d
+classDef stub fill:#fef3c7,stroke:#b45309,color:#78350f
+classDef idle fill:#f1f5f9,stroke:#64748b,color:#334155,stroke-dasharray: 5 4
+classDef missing fill:#fee2e2,stroke:#b91c1c,color:#7f1d1d,stroke-dasharray: 5 4
+classDef ext fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a
+classDef data fill:#f5f5f4,stroke:#78716c,color:#44403c

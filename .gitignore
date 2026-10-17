@@ -1,0 +1,25 @@
+# Secrets: real keys live in .env / .env.* and never get committed
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Model weights and runtime output
+*.pt
+*.onnx
+runs/
+wandb/
+data/*
+!data/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

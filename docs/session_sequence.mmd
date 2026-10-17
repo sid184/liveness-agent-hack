@@ -1,0 +1,42 @@
+%% liveness-agent: call order of one session (scripts/smoke_pipeline.py -> agent/loop.py run_session). Paste into https://mermaid.live
+sequenceDiagram
+    autonumber
+    participant S as scripts/smoke_pipeline.py
+    participant C as challenge.issue()
+    participant F as capture.sample_frames()
+    participant Y as perception.Detector (YOLO, runs locally)
+    participant L as agent/loop.py run_session()
+    participant R as reason.VisionReasoner
+    participant V as VLM endpoint (NVIDIA hosted Llama by default, or the Cosmos pod)
+    participant I as index.SqliteIndex (data/index/sessions.db)
+    participant W as eval.wandb_log
+
+    S->>C: issue(challenge_id or random)
+    C-->>S: IssuedChallenge(instruction, criteria, params, issued_at, deadline)
+    opt wandb flag
+        S->>W: start_run(name, config)
+    end
+    S->>L: run_session(video, challenge, n_frames=6, label)
+    L->>F: sample_frames(video, n)
+    F-->>L: n evenly spaced Frames (BGR image, index, t_seconds)
+    loop each frame
+        L->>Y: detect(image, conf=0.25)
+        Y-->>L: list of Detection(label, conf, box)
+    end
+    L->>L: geometric_signal() person frames, object frames, object over person (object_pass only)
+    L->>L: format COHERENCE prompt with instruction, criteria, n, duration
+    L->>R: describe(frames, prompt)
+    R->>R: JPEG encode at 768 px, or tile into one montage if frame_format=montage
+    R->>V: POST chat/completions with text plus base64 image_url parts
+    V-->>R: message.content (or reasoning_content), usage
+    R-->>L: VlmResult(text, latency_s, model, usage, reasoning)
+    L->>L: parse_verdict() OBSERVED, COHERENT, VERDICT, CONFIDENCE
+    L->>L: combine() VLM decides, geometric fail halves the score, PASS at 0.5 or more
+    L->>I: add(SessionRecord)
+    I-->>L: one row inserted
+    L-->>S: SessionRecord
+    S->>S: print verdict, score, raw VLM text, geometric signals
+    opt wandb flag
+        S->>W: log_session(the same record) then finish()
+    end
+    Note over L,I: Never called anywhere: AgentLLM, SqliteIndex.search() and where(), iter_frames(), Detector.track(), the deadline
