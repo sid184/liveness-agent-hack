@@ -167,6 +167,8 @@ def test_cues_from_keypoints_and_objects():
     still = np.full((10, 10), 128, np.uint8)
     assert frame_diff([still] * 4) == 0.0
     assert frame_diff([still, still + 3, still]) == 3.0
+    # A slow call stream repeats frames; a few real changes still count as live.
+    assert frame_diff([still, still, still + 3, still + 3, still, still]) >= 1.0
 
 
 def test_head_crop_from_keypoints():
@@ -364,3 +366,25 @@ def test_pick_frames_takes_extremes_in_time_order():
     assert {21, 90, 45, 66} <= set(picked)
     assert pick_frames({"frame_indices": [0, 3], "pose_track": [None, None]}, 5) == [0, 3]
     assert len(pick_frames({"frame_indices": list(range(40)), "pose_track": [None] * 40}, 5)) == 5
+
+
+def test_call_window_with_self_view_tracks_the_caller():
+    from agent.loop import combine
+    from perception.cues import cues_from_detections, main_person
+
+    xy, cf = _kp((300, 232), (320, 200), (280, 200))
+    caller = Detection("person", 0.86, (150, 90, 460, 290), keypoints=xy, kp_conf=cf)
+    self_view = Detection("person", 0.92, (415, 150, 540, 280), keypoints=xy * 0.3, kp_conf=cf)
+    thumb = Detection("person", 0.5, (415, 300, 447, 328), keypoints=xy * 0.1, kp_conf=cf)
+    # The most confident detection is the self-view; the caller is the biggest.
+    assert main_person([self_view, caller, thumb]) is caller
+    assert cues_from_detections([[self_view, caller, thumb]])[0].nose is not None
+    two_people = Detection("person", 0.9, (100, 90, 400, 290), keypoints=xy, kp_conf=cf)
+    assert main_person([caller, two_people]) is None
+    # Nobody measurable is INCONCLUSIVE ("could not see"), never a FAIL.
+    nothing = geometric_signal([], frame_diff=2.0)
+    assert nothing["gates"]["smooth"] is True
+    from perception.cues import FrameCue
+
+    unseen = geometric_signal([FrameCue() for _ in range(10)], frame_diff=2.0)
+    assert combine(unseen, {"verdict": "PASS", "confidence": 0.95}) == ("INCONCLUSIVE", 0.95)

@@ -112,6 +112,27 @@ ARTIFACTS: <none | list each problem with its frame numbers>
 VERDICT: <PASS|FAIL>
 CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
 
+# v8 (17 Oct, experimental): Cosmos gets the whole clip (VLM_FRAME_FORMAT=video), not stills,
+# and is asked about the physics of the motion, where generated video differs from a camera.
+# Not a COHERENCE_VERSIONS entry: it takes no frame list. scripts/separation.py --video-judge.
+COHERENCE_VIDEO = """You are watching a {duration:.0f} second clip of one person on a video call. \
+It is either a real camera recording or a video made by a generator (an AI model). Judge the \
+physics of the motion, which generated video usually gets subtly wrong:
+- does the head have weight and inertia: small abrupt corrections, settling, uneven speed, or \
+does it glide smoothly like an animation curve?
+- does hair lag and settle after the head moves; do earrings, collars and necklaces move with it?
+- do the shoulders and chest move on their own (breathing, shifting) or stay frozen?
+- is there any camera shake, refocus, exposure change or sensor noise, or is the frame perfectly \
+stable and clean?
+- do skin texture, teeth, hairline and background details stay fixed, or shimmer and re-form?
+- are blinks natural in timing and duration?
+
+Answer in exactly this format, nothing else:
+OBSERVED: <what the motion is like, citing seconds>
+ARTIFACTS: <none | each sign of generation, with the second it appears>
+VERDICT: <PASS if a real camera recording, FAIL if generated>
+CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
+
 # Judge prompts by version. PROMPT_VERSION picks the live one; scripts/eval_clips.py runs them all
 # on the labelled clips and logs the comparison to W&B. Add a version, never edit one in place,
 # so earlier eval runs stay comparable. v1-v3 were written for the head-circle challenge.

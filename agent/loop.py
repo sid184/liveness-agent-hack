@@ -27,7 +27,14 @@ from eval.tracing import op
 from index import SessionRecord, get_index
 from index.embed import embed
 from perception import Detection, Detector, HeadPose, max_jump, motion_range
-from perception.cues import FrameCue, add_objects, cues_from_detections, frame_diff, summarise
+from perception.cues import (
+    FrameCue,
+    add_objects,
+    cues_from_detections,
+    frame_diff,
+    main_person,
+    summarise,
+)
 from reason import VisionReasoner
 from reason.prompts import COHERENCE_VERSIONS
 
@@ -111,7 +118,8 @@ def geometric_signal(cues: list[FrameCue], frame_diff: float | None = None) -> d
     jump = max_jump(poses)
     gates = {
         "one_face": n > 0 and measurable / n >= MIN_FACE_FRACTION,
-        "smooth": measurable >= 2 and jump <= MAX_JUMP,
+        # Nothing measured is "could not see", not a jump: one_face already makes it INCONCLUSIVE.
+        "smooth": measurable < 2 or jump <= MAX_JUMP,
         "alive": summary.alive,
         "not_frozen": frame_diff is None or not summary.frozen,
         "no_device": summary.device is None,
@@ -219,17 +227,16 @@ def head_crop(
     per_frame: list[list[Detection]], shape: tuple[int, ...], margin: float = 1.2
 ) -> list[int] | None:
     """One box around the head across the whole window, from the face keypoints of the most
-    confident person in each frame, grown by `margin` of its size and clamped to the image.
+    largest person (the caller) in each frame, grown by `margin` and clamped to the image.
 
     A call recording is usually a whole meeting window; the face is a small patch of it. Cosmos
     judges a 640 px face far better than a 640 px window with a face in it (17 Oct).
     """
     pts = []
     for dets in per_frame:
-        people = [d for d in dets if d.keypoints is not None and d.kp_conf is not None]
-        if not people:
+        d = main_person(dets)  # the caller's tile, not the viewer's own self-view
+        if d is None or d.kp_conf is None:
             continue
-        d = max(people, key=lambda d: d.conf)
         ok = d.kp_conf[:5] >= 0.3
         if ok.any():
             pts.append(d.keypoints[:5][ok])
@@ -260,13 +267,19 @@ def observe(video_path: str, detector: Detector, objects: Detector | None = None
     if objects is not None:
         for i in range(0, len(geo_frames), OBJECT_EVERY):
             add_objects(cues[i], objects.detect(geo_frames[i].image))
-    # Frozen check on 8 consecutive video frames (the pose sample is spread out in time).
-    start = geo_frames[len(geo_frames) // 2].index if geo_frames else 0
-    consecutive = read_frames(video_path, [start + k for k in range(8)])
-    grey = [cv2.cvtColor(cv2.resize(f.image, (320, 180)), cv2.COLOR_BGR2GRAY) for f in consecutive]
+    # Frozen check inside the caller's head box (a shared call window is mostly static
+    # interface), on 10 frames spread over the window: a call video refreshes slower than we
+    # record, so neighbouring frames are often exact duplicates even when the caller moves.
+    crop = head_crop(per_frame, geo_frames[0].image.shape) if geo_frames else None
+    spread = geo_frames[:: max(1, len(geo_frames) // 10)]
+    imgs = [f.image for f in spread]
+    if crop:
+        x1, y1, x2, y2 = crop
+        imgs = [im[y1:y2, x1:x2] for im in imgs]
+    grey = [cv2.cvtColor(cv2.resize(im, (160, 160)), cv2.COLOR_BGR2GRAY) for im in imgs]
     geo = geometric_signal(cues, frame_diff(grey))
     geo["frame_indices"] = [f.index for f in geo_frames]
-    geo["crop"] = head_crop(per_frame, geo_frames[0].image.shape) if geo_frames else None
+    geo["crop"] = crop
     geo["pose_track"] = [None if c.pose is None else [c.pose.yaw, c.pose.pitch] for c in cues]
     return {"geo": geo, "poses": [c.pose for c in cues]}
 

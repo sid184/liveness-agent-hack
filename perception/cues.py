@@ -31,10 +31,12 @@ HELD = frozenset({"cup", "bottle", "wine glass", "cell phone"})  # natural occlu
 # Thresholds, from scripts/calibrate_cues.py on 17 Oct (3 team clips, plus a held photo and a
 # frozen frame made from each). Measured: live 0.37-0.49 / 0.24-0.41, live with the head held
 # still 0.27 / 0.18 (one 3 s slice), held photo 0.019-0.065 / 0.015-0.032, frozen <= 0.007.
-# Frame difference: live 1.1-9.3, frozen 0.00. Re-run on a truly still caller before trusting.
+# Re-run on a truly still caller before trusting.
 MIN_POSE_JITTER = 0.10  # spread of the nose in the eyes' own frame, summed over 2 axes
 MIN_HEAD_BODY = 0.06  # spread of the nose against the shoulders, summed over 3 measures
-FROZEN_DIFF = 0.35  # median mean-abs difference of consecutive grey frames (0-255) below this
+# Frame difference over frames spread across the window, in the caller's head box (17 Oct):
+# frozen feeds 0.02-0.22, held photos 6-10, live callers 10-32 (files and shared call windows).
+FROZEN_DIFF = 2.0  # below this = frozen
 HAND_RADIUS = 2.0  # a wrist within this many eye distances of the nose = hand at the face
 HELD_RADIUS = 2.5  # an object box edge within this many eye distances of the nose
 DEVICE_MIN_FRAMES = 2  # sampled frames with the face inside a device before it counts
@@ -114,13 +116,24 @@ def frame_cue(person: Detection | None) -> FrameCue:
     return cue
 
 
+SECOND_PERSON = 0.4  # another person this big (box area vs the caller's) = two people in shot
+
+
+def main_person(dets: list[Detection]) -> Detection | None:
+    """The caller: the largest person in the frame. A shared call window also shows the viewer's
+    own self-view and participant thumbnails; those small people are ignored. None when nobody
+    is there, or when a second person is nearly as large (two people in one shot)."""
+    people = sorted((d for d in dets if d.keypoints is not None), key=lambda d: -d.area)
+    if not people:
+        return None
+    if len(people) > 1 and people[1].area >= SECOND_PERSON * people[0].area:
+        return None
+    return people[0]
+
+
 def cues_from_detections(per_frame: list[list[Detection]]) -> list[FrameCue]:
-    """One cue per frame from the single person in it; an empty cue when there are 0 or 2+."""
-    out = []
-    for dets in per_frame:
-        people = [d for d in dets if d.keypoints is not None]
-        out.append(frame_cue(people[0] if len(people) == 1 else None))
-    return out
+    """One cue per frame for the caller (see main_person); an empty cue when there is none."""
+    return [frame_cue(main_person(dets)) for dets in per_frame]
 
 
 def _box_near(box: tuple[int, int, int, int], x: float, y: float, margin: float) -> bool:
@@ -158,14 +171,16 @@ def micro_motion(cues: list[FrameCue]) -> dict[str, float]:
 
 
 def frame_diff(grey_frames: list[np.ndarray]) -> float:
-    """Median mean-absolute difference between consecutive frames (0-255). ~0 = frozen."""
+    """How much successive sample frames differ (mean absolute difference, 0-255), taken at the
+    80th percentile so a few duplicated frames from a slow call stream do not read as frozen.
+    A frozen feed is ~0 for every pair."""
     if len(grey_frames) < 2:
         return 0.0
     diffs = [
         float(np.mean(np.abs(a.astype(np.int16) - b.astype(np.int16))))
         for a, b in zip(grey_frames, grey_frames[1:], strict=False)
     ]
-    return round(float(np.median(diffs)), 3)
+    return round(float(np.percentile(diffs, 80)), 3)
 
 
 @dataclass
