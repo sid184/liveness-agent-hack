@@ -23,7 +23,7 @@ def main() -> None:
     ap.add_argument("--frames", type=int, default=6)
     ap.add_argument("--prompt")
     ap.add_argument("--model", help="override VLM_MODEL")
-    ap.add_argument("--frame-format", choices=["images", "montage", "video_frames"])
+    ap.add_argument("--frame-format", choices=["images", "montage", "video_frames", "video"])
     args = ap.parse_args()
 
     if args.video:
@@ -43,7 +43,7 @@ def main() -> None:
     vlm = VisionReasoner(model=args.model, frame_format=args.frame_format)
     print(f"model={vlm.model} base_url={settings.vlm_base_url}")
     print(f"frames={len(images)} format={vlm.frame_format}")
-    res = vlm.describe(images, prompt)
+    res = vlm.describe(images, prompt, video_path=args.video)
     print(f"latency={res.latency_s:.1f}s usage={res.usage}")
     if res.reasoning:
         print("-" * 20, "reasoning", "-" * 20)

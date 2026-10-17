@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -44,7 +45,20 @@ class VisionReasoner:
             max_retries=1,
         )
 
-    def _content(self, images: list[np.ndarray], prompt: str, max_edge: int) -> list[dict]:
+    def _content(
+        self,
+        images: list[np.ndarray],
+        prompt: str,
+        max_edge: int,
+        video_path: str | Path | None = None,
+    ) -> list[dict]:
+        if self.frame_format == "video" and video_path:
+            # Cosmos NIM / vLLM: the clip itself, base64 mp4. The server samples frames.
+            b64 = base64.b64encode(Path(video_path).read_bytes()).decode()
+            return [
+                {"type": "text", "text": prompt},
+                {"type": "video_url", "video_url": {"url": "data:video/mp4;base64," + b64}},
+            ]
         if self.frame_format == "montage" and len(images) > 1:
             images = [montage(images)]
             max_edge = max(max_edge, 1024)
@@ -68,14 +82,16 @@ class VisionReasoner:
         max_tokens: int = 512,
         temperature: float = 0.2,
         max_edge: int = 768,
+        video_path: str | Path | None = None,
     ) -> VlmResult:
-        """Send one or more frames with a prompt; return the model's text and timing."""
-        if not images:
+        """Send frames (or, with frame_format=video, the clip itself) plus a prompt."""
+        if not images and not (self.frame_format == "video" and video_path):
             raise ValueError("at least one image is required")
         t0 = time.perf_counter()
+        content = self._content(images, prompt, max_edge, video_path)
         resp = self.client.chat.completions.create(
             model=self.model,
-            messages=[{"role": "user", "content": self._content(images, prompt, max_edge)}],
+            messages=[{"role": "user", "content": content}],
             max_tokens=max_tokens,
             temperature=temperature,
         )

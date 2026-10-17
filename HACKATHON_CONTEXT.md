@@ -134,6 +134,29 @@ Roles: one on video pipeline (capture -> YOLO -> Cosmos -> index), one on agent 
   4. Face and hand detection: stock YOLO has neither.
   5. Live webcam window, agent LLM in the loop, UI: all unbuilt.
   6. Check whose W&B key is in `.env` before logging (was the employer's on 11 Oct).
+- **Organisers' stack (read from github.com/vast-data/vast-builders-challenge, 17 Oct):**
+  - Direct GPU endpoints, bearer token `GPU_BEARER_TOKEN` from `/config/<team>.config` on the lab
+    VM (Cursor Remote-SSH host `bc-<username>`). Host `166.19.38.112`: Cosmos3-Reason `:8001`
+    (OpenAI chat, model `nvidia/cosmos3-reason`, accepts `video_url` base64 mp4), YOLO11s `:8002`
+    (`POST /v1/infer` with `video_base64`, health `/healthz`), Cosmos Embed1 `:8003`
+    (`/v1/embeddings`, 256-dim, `request_type: query`), Canary ASR `:8004`. **Reachable from the
+    laptop** (401 without token), so the pipeline and webcam run locally.
+  - VSS backend at `INGRESS_URL`, JWT via `POST /api/v1/auth/login` with team `USERNAME`/`PASSWORD`:
+    `POST /api/v1/videos/upload` (multipart, metadata: tags, camera_id, location, scenario or
+    custom_prompt up to 800 chars; async indexing, tens of seconds to minutes), `POST /api/v1/search`
+    (hybrid, `metadata_filters`, `min_similarity`), `POST /api/v1/agent/ask`, `/videos/stream`.
+  - VastDB via the `vastdb` Python SDK on `S3_ENDPOINT` with `ACCESS_KEY`/`SECRET_KEY`: create our
+    own table in `VASTDB_BUCKET` (new schema, e.g. `hackathon.liveness_sessions`). Never touch
+    `vss-collection`.
+  - W&B team key and project are in the VM environment (`WANDB_API_KEY`, `WANDB_TEAM`,
+    `WANDB_PROJECT`): use those, not the personal key.
+  - Rules: web app, CLI or script (no native app); don't ingest internet video; one team-number
+    selection on the lab page, irreversible. Submit at tokensand.com/vastlondon from about 4:30 pm;
+    first-round judging is a walkthrough at the table.
+  - Pre-indexed corpus includes an SDG warehouse pack (~178 clips, `sdg_warehouse_cam-2`), so the
+    bottleneck fallback starts from indexed data.
+  - **Decision:** Cosmos3-Reason on their endpoint is the default vision model (`.env`). Our RunPod
+    pod is the backup and stays stopped. Local setup: `scp bc-<user>:/config/*.config .env.team`.
 - **Ask the organisers first:** is a Cosmos endpoint provided today? Is VAST available, and how?
   Are pre-written code and own footage allowed?
 - **1 pm checkpoint** stands: if challenge -> clip -> verdict isn't working end to end on real

@@ -9,6 +9,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
+# .env.team is a copy of the organisers' /config/<team>.config (gitignored). Loaded first so
+# .env can reference its values (e.g. VLM_API_KEY=${GPU_BEARER_TOKEN}) and so the team W&B key
+# wins over a stale personal one.
+load_dotenv(ROOT / ".env.team")
 load_dotenv(ROOT / ".env")
 
 
@@ -27,7 +31,7 @@ class Settings:
     vlm_base_url: str
     vlm_model: str
     vlm_api_key: str
-    vlm_frame_format: str  # images | montage | video_frames
+    vlm_frame_format: str  # images | montage | video_frames | video
 
     # Agent LLM (W&B Inference)
     agent_base_url: str
@@ -43,6 +47,20 @@ class Settings:
 
     # Index
     index_backend: str  # sqlite | local | vast
+
+    # Organisers' stack (from .env.team; empty when not at the event)
+    gpu_bearer_token: str
+    cosmos3_reason_url: str
+    yolo_url: str
+    cosmos_embed1_url: str
+    ingress_url: str
+    team_username: str
+    team_password: str
+    s3_endpoint: str
+    access_key: str
+    secret_key: str
+    vastdb_bucket: str
+    vdb_schema: str
 
     # Paths
     root: Path
@@ -67,6 +85,18 @@ def load_settings() -> Settings:
         wandb_entity=_env("WANDB_ENTITY"),
         yolo_model=_env("YOLO_MODEL", "yolo11n.pt"),
         index_backend=_env("INDEX_BACKEND", "sqlite"),
+        gpu_bearer_token=_env("GPU_BEARER_TOKEN"),
+        cosmos3_reason_url=_env("COSMOS3_REASON_URL"),
+        yolo_url=_env("YOLO_URL"),
+        cosmos_embed1_url=_env("COSMOS_EMBED1_URL"),
+        ingress_url=_env("INGRESS_URL"),
+        team_username=_env("USERNAME"),
+        team_password=_env("PASSWORD"),
+        s3_endpoint=_env("S3_ENDPOINT"),
+        access_key=_env("ACCESS_KEY"),
+        secret_key=_env("SECRET_KEY"),
+        vastdb_bucket=_env("VASTDB_BUCKET"),
+        vdb_schema=_env("VDB_SCHEMA"),
         root=ROOT,
         data_dir=ROOT / "data",
     )

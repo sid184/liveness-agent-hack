@@ -85,7 +85,7 @@ def run_session(
     prompt = COHERENCE.format(
         instruction=ch.instruction, criteria=ch.criteria, n=len(frames), duration=duration
     )
-    result = reasoner.describe([f.image for f in frames], prompt)
+    result = reasoner.describe([f.image for f in frames], prompt, video_path=video_path)
     vlm = parse_verdict(result.text)
     verdict, score = combine(geo, vlm)
 
