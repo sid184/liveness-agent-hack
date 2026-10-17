@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from agent.loop import combine, decide_call, geometric_signal, parse_verdict
+from agent.loop import MAX_WINDOWS, combine, decide_call, geometric_signal, parse_verdict
 from capture.frames import montage, synthetic_test_image, to_jpeg_bytes
 from index.base import SessionRecord
 from index.local import LocalIndex
@@ -98,7 +98,7 @@ def test_decide_call():
     assert decide_call(["PASS"]) == "WATCHING"
     assert decide_call(["INCONCLUSIVE", "PASS", "PASS"]) == "PASS"
     assert decide_call(["PASS", "FAIL"]) == "FAIL"
-    assert decide_call(["INCONCLUSIVE"] * 6) == "INCONCLUSIVE"
+    assert decide_call(["INCONCLUSIVE"] * MAX_WINDOWS) == "INCONCLUSIVE"
     assert decide_call(["ERROR", "PASS"]) == "WATCHING"
 
 

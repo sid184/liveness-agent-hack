@@ -34,7 +34,10 @@ _FIELD = re.compile(r"^(OBSERVED|ARTIFACTS|COHERENT|VERDICT|CONFIDENCE):\s*(.*)$
 _FRAME_NUM = re.compile(r"\bframes?\s*(\d+(?:\s*(?:,|and|-|to)\s*\d+)*)", re.I)
 
 MODE = "passive_watch"  # SessionRecord.challenge_id: there is no challenge any more
-INSTRUCTION = "None. The caller was not asked to do anything; this is natural conversation."
+INSTRUCTION = (
+    "Natural conversation. The overlay asks the caller to keep talking and turn their head "
+    "slowly to each side; nothing else."
+)
 
 # Scoring constants. Tune on the labelled clips, not by feel.
 THRESHOLD = 0.5
@@ -43,14 +46,14 @@ MAX_JUMP = 0.8  # (yaw, pitch) jump between geometry frames above this is a cut,
 MIN_FACE_FRACTION = 0.9  # frames in which exactly one face must be measurable
 # Natural head movement needed before a PASS counts. A still talking head shows Cosmos no 3D
 # structure to judge. Measured 17 Oct: deliberate turns span yaw 1.0 to 1.2.
-MIN_YAW_RANGE = 0.5
+MIN_YAW_RANGE = 0.35  # a natural glance of about 30 degrees; measured 17 Oct on live windows
 MIN_PITCH_RANGE = 0.4
 N_GEO_FRAMES = 40  # YOLO is cheap: about 4 fps over a 10 s clip, enough to see jumps
 
 # Call decision.
 WINDOW_S = 8  # seconds per recorded window
 PASSES_NEEDED = 2  # clean windows before the caller is cleared
-MAX_WINDOWS = 6  # then stop watching: INCONCLUSIVE
+MAX_WINDOWS = 8  # then stop watching: INCONCLUSIVE
 
 
 def parse_verdict(text: str) -> dict[str, Any]:

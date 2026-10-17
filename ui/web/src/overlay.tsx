@@ -134,6 +134,11 @@ function Body({ state, ready, onAction }: Omit<Props, "inline" | "win">) {
           shineColor="#5eead4"
           className="text-[17px] font-extrabold"
         />
+        <div className={`text-[12px] ${state.note?.includes("inconclusive") ? "text-warn" : "text-muted"}`}>
+          {state.note?.includes("inconclusive")
+            ? "Not enough movement yet: turn your head further, left then right."
+            : "Keep talking. Turn your head slowly to each side."}
+        </div>
         <div className="h-[3px] overflow-hidden rounded bg-line">
           <i
             key={state.windowStartedAt}
