@@ -29,7 +29,7 @@ import numpy as np
 
 import scripts._paths  # noqa: F401
 from agent.loop import (
-    NO_RESPONSE_WINDOWS,
+    MAX_WINDOWS,
     THRESHOLD,
     combine,
     decide_call,
@@ -220,9 +220,8 @@ def main() -> None:
                     "cited_frames": ",".join(map(str, vlm.get("cited_frames") or [])),
                     "score": score,
                     "verdict": verdict,
-                    # What a live call decides if every window looks like this one: a still
-                    # window three times is a FAIL (no response), a clean window twice a PASS.
-                    "call": decide_call([verdict] * max(NO_RESPONSE_WINDOWS, 2)),
+                    # What a live call decides if every window looks like this one.
+                    "call": decide_call([verdict] * MAX_WINDOWS),
                     "correct": verdict == ("PASS" if label == "live" else "FAIL"),
                     "latency_s": round(time.perf_counter() - t0, 2),
                     "observed": vlm.get("observed"),

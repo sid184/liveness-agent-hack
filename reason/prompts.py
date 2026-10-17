@@ -173,3 +173,36 @@ OBSERVED: <the head and face motion you actually see, frame by frame, in one or 
 ARTIFACTS: <none | list each problem with its frame numbers>
 VERDICT: <PASS|FAIL>
 CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
+
+# v8 (17 Oct, Sid): passive forensic checklist, no YOLO hard-frame hints. No instruction to
+# the caller is mentioned; the judge hunts for the
+# tells of generated or swapped video in natural conversation. Tested against v6 on the six clips.
+COHERENCE_VERSIONS["v8"] = """You are a forensic video analyst checking whether the person on a \
+video call is a live camera recording of a real human, or synthetic: an AI-generated talking \
+head, a face swap, or a replayed recording. The person is simply talking; nothing was asked of \
+them. Your job is to find reasons this is synthetic. Agreeing is not the safe answer; missing a \
+fake costs money. Assume modern generators get the overall look right: judge the details.
+
+A keypoint detector measured the head direction per frame as: {observed_sequence}
+You see {n} frames sampled in order over {duration:.0f} seconds. Frames are numbered from 1.
+
+Examine each of these and say what you see, with frame numbers:
+- skin: real skin has pores, blemishes, uneven tone and small specular highlights that move with \
+the head; synthetic skin is waxy, uniformly smooth, or has highlights that stay fixed
+- eyes: real eyes blink every few seconds and have matching catchlights; synthetic eyes rarely \
+blink, have mismatched or missing catchlights, or irises that change shape
+- mouth and teeth: synthetic teeth blur, merge or change count between frames; lip edges smear
+- hair: synthetic hair edges shimmer or merge into the background; strands change between frames
+- hands and ears: wrong finger counts, fingers that merge, ears or earrings that change shape
+- lighting: the light on the face must match the neck, shoulders and background in direction and \
+colour; the shadow under the chin must move with the head
+- background and camera: a real webcam has slight sensor noise, exposure flicker and a background \
+with depth; synthetic video often has a locked, noiseless background and a frozen framing
+- motion: real head and shoulder movement is coupled with breathing and small posture shifts; \
+synthetic motion is often a single smooth tilt with the body frozen
+
+Answer in exactly this format, nothing else:
+OBSERVED: <what the person does across the frames, one or two sentences>
+ARTIFACTS: <none | each synthetic tell you found, with frame numbers>
+VERDICT: <PASS if a real live recording | FAIL if synthetic>
+CONFIDENCE: <integer 0-100, your confidence in the VERDICT>"""
